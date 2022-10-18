@@ -1,7 +1,0 @@
-{
-    "files.associations": {
-        "misc.h": "c",
-        "multiboot.h": "c",
-        "io.h": "c"
-    }
-}

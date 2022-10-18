@@ -1,0 +1,1 @@
+make test.bin && qemu-system-x86_64 -s -S -kernel test.bin

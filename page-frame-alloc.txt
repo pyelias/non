@@ -1,0 +1,24 @@
+each frame has 1 bit for if it's available
+each 4-frame group has 2 bits for the largest available order of sub-page (0, 1, 2, 4)
+each 16-frame group has 3 bits (or 4?) for the largest sub-page (0, 1, 2, 4, 8, 16)
+and so on
+
+max group size = number of frames / 16 i guess
+
+largest possible sub-page order is 16384 pages, any more won't fit in the bitmap
+
+n = frame count
+total usage = 1 * n + 2 * n/4 + 3or4 * n/16 + 4 * n/64 + ...
+less than 2n bits, probably
+
+to get a frame of some order
+find a top level group with an available sub-frame of that order
+look at the groups in it, and find with with that order available
+recurse until found
+update parent group avail info
+
+groups are an allocator-internal bookkeeping construct
+groups have a size: 0, 1, 2, ... represents 1 frame, 4 frames, 16 frames, ...
+
+pages are returned from the allocator
+pages have an order: 0, 1, 2, ... represents 1 frame, 2 frames, 4 frames, ...

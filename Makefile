@@ -1,28 +1,35 @@
 CC = x86_64-elf-gcc
-OBJ_DIR = build/objs
+CFLAGS = -MMD -m64 -c -ffreestanding -mcmodel=kernel -mno-red-zone -O2 -Wall -Wextra
+AS = nasm
+ASFLAGS = -f elf64 -w+orphan-labels
 
-c_src = $(wildcard src/*.c)
-asm_src = $(wildcard src/*.asm)
-obj =  $(c_src:src/%.c=$(OBJ_DIR)/%.o)
-obj += $(asm_src:src/%.asm=$(OBJ_DIR)/%.o)
-dep = $(src:src/%.c=$(OBJ_DIR)/%.d)
+KERNEL_SRC_DIR = src/kernel
+KERNEL_OBJ_DIR = build/objs/kernel
+KERNEL_DEP_DIR = build/deps/kernel
 
-test.bin: build/full.o
-	objcopy -O elf32-i386 build/full.o test.bin
+kernel_c_src = $(wildcard $(KERNEL_SRC_DIR)/*.c)
+kernel_asm_src = $(wildcard $(KERNEL_SRC_DIR)/*.asm)
+kernel_obj =  $(kernel_c_src:$(KERNEL_SRC_DIR)/%.c=$(KERNEL_OBJ_DIR)/%.c.o)
+kernel_obj += $(kernel_asm_src:$(KERNEL_SRC_DIR)/%.asm=$(KERNEL_OBJ_DIR)/%.asm.o)
+kernel_dep =  $(src:src/%.c=$(KERNEL_DEP_DIR)/%.c.d)
+kernel_dep += $(src:src/%.asm=$(KERNEL_DEP_DIR)/%.asm.d)
 
-build/full.o: $(obj) src/linker.ld
-	ld -m elf_x86_64 -T src/linker.ld -o $@ $(obj)
+test.bin: build/kernel.o
+	objcopy -O elf32-i386 build/kernel.o test.bin
 
-$(OBJ_DIR)/%.o: src/%.c $(OBJ_DIR) 
-	$(CC) -MMD -m64 -c -o $@ -ffreestanding -mcmodel=kernel -O2 -Wall -Wextra $<
+build/kernel.o: $(kernel_obj) linker.ld
+	ld -m elf_x86_64 -T linker.ld -o $@ $(kernel_obj)
 
-$(OBJ_DIR)/%.o: src/%.asm $(OBJ_DIR) 
-	nasm -f elf64 -w+orphan-labels -o $@ $<
+$(KERNEL_OBJ_DIR)/%.c.o: $(KERNEL_SRC_DIR)/%.c $(KERNEL_OBJ_DIR) 
+	$(CC) $(CFLAGS) -Iinclude/kernel -o $@ $<
 
-$(OBJ_DIR):
+$(KERNEL_OBJ_DIR)/%.asm.o: $(KERNEL_SRC_DIR)/%.asm $(KERNEL_OBJ_DIR) $(KERNEL_DEP_DIR)
+	$(AS) $(ASFLAGS) -MD $(KERNEL_DEP_DIR)/$*.asm.d -o $@ $<
+
+$(KERNEL_OBJ_DIR) $(KERNEL_DEP_DIR):
 	mkdir -p $@
 
--include $(dep)
+-include $(kernel_dep)
 
 .PHONY: clean
 clean:

@@ -1,7 +1,7 @@
 ENTRY(_start)
 
 BOOTSTRAP_LMA = 1M;
-KERNEL_VMA = 0xFFFFFFFF80000000;
+KERNEL_VMA = 0xFFFFFFFFC0000000;
 
 SECTIONS
 {
@@ -35,6 +35,11 @@ SECTIONS
         *(.text)
     }
 
+    .data ALIGN(4K) :
+    {
+        *(.data)
+    }
+
     .rodata ALIGN(4K) :
     {
         *(.rodata)
@@ -44,4 +49,6 @@ SECTIONS
     {
         *(.bss)
     }
+
+    KERNEL_END_VMA = .;
 }

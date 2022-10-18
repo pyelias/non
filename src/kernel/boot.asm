@@ -25,6 +25,10 @@ global _start:function (_start.end - _start)
 _start:
     mov esp, stack_top ; setup stack
 
+    ; save multiboot stuff for call_kernel_main
+    push eax
+    push ebx
+
     mov byte [0xB8500], 'a'
     mov byte [0xB8501], 7 ; light grey on black
 
@@ -42,7 +46,7 @@ _start:
 
     ; now use the GDT to jump to 64-bit mode
     lgdt [GDT.desc]
-    jmp GDT.code:.in_long_mode
+    jmp GDT.long_mode_code:.in_long_mode
 .in_long_mode:
     bits 64
     mov rax, call_kernel_main
@@ -69,9 +73,8 @@ puts:
 
 hang:
     cli
-.loop:
     hlt
-    jmp .loop
+    jmp hang
 
 ; eax is zero and zero flag set if not
 is_cpuid_supported:
@@ -123,9 +126,9 @@ set_up_paging:
     ; 0x2000: level 3 PDPT (page directory pointer table)
     ; 0x3000: level 2 PDT (page directory table)
 
-    ; 0x1000 will point to 0x2000
-    ; 0x2000 will point to 0x3000
-    ; 0x3000 will point to the bottom 2MB
+    ; 0x1000 will point to 0x2000 at 0 and 511
+    ; 0x2000 will point to 0x3000 at 0 and 511
+    ; 0x3000 will identity map the bottom 1gb
 
     ; first, zero all 3 pages
     mov edi, 0x1000
@@ -148,13 +151,22 @@ set_up_paging:
     mov dword [edi + 511 * 8], 0x2000 | .ENTRY_PRESENT | .ENTRY_RW
     add edi, 0x1000
     ; 0x2000 (L3) points to:
-    ; 0x3000 at 0b000000000 and 0b111111110
+    ; 0x3000 at 0b000000000 and 0b111111111
     mov dword [edi], 0x3000 | .ENTRY_PRESENT | .ENTRY_RW
-    mov dword [edi + 510 * 8], 0x3000 | .ENTRY_PRESENT | .ENTRY_RW
+    mov dword [edi + 511 * 8], 0x3000 | .ENTRY_PRESENT | .ENTRY_RW
     add edi, 0x1000
     ; 0x3000 (L2) points to:
-    ; 2MB at 0 at 0b000000000
-    mov dword [edi], .ENTRY_PRESENT | .ENTRY_RW | .ENTRY_PAGESIZE
+    ; 2MB at 0MB at 0b000000000
+    ; 2MB at 2MB at 0b000000001
+    ; etc.
+    ; identity map 1GB total
+    mov ecx, 512
+    mov eax, .ENTRY_PRESENT | .ENTRY_RW | .ENTRY_PAGESIZE ; pdt entry
+.id_map_loop:
+    mov dword [edi], eax
+    add eax, 0x200000 ; point next entry to next 2MB
+    add edi, 8        ; move to location of next entry
+    loop .id_map_loop
 
     ret
 
@@ -188,41 +200,56 @@ GDT:
 
     .64_bit_TSS equ 0x9
 
-    ; args are access and flags
+    ; args are base, limit, access and flags
+    %macro gdt_entry_full 4
+        dw %2                      ; 16 bits of limit
+        dw %1 & 0xFFFF             ; 16 bits of base
+        db (%1 >> 16) & 0xFF       ; 8 bits of base
+        db %3                      ; access byte
+        db (%4) | (%2 >> 16)       ; flags and 4 bits of limit
+        db (%1 >> 24) & 0xFF       ; 8 bits of base
+        dd (%1 >> 32) & 0xFFFFFFFF ; 32 bits of base
+        dd 0                       ; padding / reserved
+    %endmacro
+
     %macro gdt_entry 2
-        dw 0xFFFF   ; 16 bits of limit
-        dw 0        ; 16 bits of base
-        db 0        ; 8 bits of base
-        db %1       ; access byte
-        db (%2) | 0xF ; flags and 4 bits of limit
-        db 0        ; 8 bits of base
+        gdt_entry_full 0, 0xFFFF, %1, %2
     %endmacro
 
     .null: equ $ - GDT
         dq 0
-    .code: equ $ - GDT
+    .long_mode_code: equ $ - GDT
         gdt_entry (.PRESENT | .NOT_SYS | .EXEC | .RW), (.PAGE_GRAN | .LONG_MODE)
     .data: equ $ - GDT
         gdt_entry (.PRESENT | .NOT_SYS | .RW), (.PAGE_GRAN | .SIZE_32)
     .TSS: equ $ - GDT
-        gdt_entry .64_bit_TSS, (.PAGE_GRAN | .SIZE_32)
+        ; TODO point this somewhere with enough space for a tss
+        gdt_entry_full 0, 0, .64_bit_TSS, (.PAGE_GRAN | .SIZE_32)
 
     ; GDT descriptor
     .desc:
         dw $ - GDT - 1  ; size - 1
         dd GDT          ; location
+; this needs to be accessed from C
+global GDT_long_mode_code_offset
+GDT_long_mode_code_offset: equ GDT.long_mode_code
 
 section .text
 call_kernel_main:
     bits 64
 
+    ; eax and ebx from multiboot got pushed earlier, and they're still there
+    mov edi, [rsp] ; pop ebx for info
+    mov esi, [rsp + 4] ; pop eax for magic
+    add rsp, 8
+
     extern kernel_main
     call kernel_main
 
+.halt_loop:
     cli
-.loop:
     hlt
-    jmp .loop
+    jmp .halt_loop
 
     bits 32
 

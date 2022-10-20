@@ -1,1 +1,1 @@
-make test.bin && qemu-system-x86_64 -s -S -kernel test.bin
+make test.bin && qemu-system-x86_64 -s -S -d int -D qemu-log.txt -kernel test.bin

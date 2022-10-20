@@ -29,29 +29,6 @@ void verify_frame_ptr(phys_ptr frame) {
     }
 }
 
-void get_usable_memory(multiboot_info_t *multiboot_info) {
-    extern char KERNEL_END_VMA, KERNEL_VMA;
-    low_frame = (size_t)(&KERNEL_END_VMA - &KERNEL_VMA);
-
-    high_frame = 0;
-    size_t length = multiboot_info->mmap_length;
-    multiboot_memory_map_t* curr = PHYS_TO_VIRT(multiboot_info->mmap_addr);
-    while (length > 0) {
-        if (curr->type == MULTIBOOT_MEMORY_AVAILABLE) {
-            phys_ptr avail_end = curr->addr + curr->len;
-            if (avail_end > high_frame) {
-                high_frame = avail_end;
-            }
-        }
-
-        length -= curr->size + 4;
-        curr = (multiboot_memory_map_t*)((size_t)curr + curr->size + 4);
-    }
-
-    low_frame = (low_frame + FRAME_LOW_MASK) & FRAME_HIGH_MASK; // round up to the first fully usable page
-    high_frame = high_frame & FRAME_HIGH_MASK; // round down to the last fully usable page
-}
-
 // a group avail is either 0 if completely full, or order+1 if a sub-page is available with that order
 void set_group_avail(group_num group, group_size size, int avail) {
     /*putstr("setting group ");
@@ -310,6 +287,9 @@ void frame_alloc_init(void) {
 pt_entry virt_page_allocator_first_l2[512] __attribute__((aligned(4096)));
 pt_entry virt_page_allocator_first_l1[512] __attribute__((aligned(4096)));
 
+extern void flush_tlb(void);
+extern void get_usable_memory(multiboot_info_t *multiboot_info, frame_ptr* low_frame, frame_ptr* high_frame);
+
 void mm_init(multiboot_info_t *multiboot_info) {
     // clear low-address identity mapping setup during boot
     // it's probably fine to just leave it but i dont want to
@@ -317,10 +297,13 @@ void mm_init(multiboot_info_t *multiboot_info) {
     ptl4[0] = 0;
     volatile pt_entry* ptl3 = PHYS_TO_VIRT(0x2000);
     ptl3[0] = 0;
+    flush_tlb();
 
-    get_usable_memory(multiboot_info);
+    get_usable_memory(multiboot_info, &low_frame, &high_frame);
+    putstr("low_frame:  ");
     putint_with_base(low_frame, 16);
     putchar('\n');
+    putstr("high_frame: ");
     putint_with_base(high_frame, 16);
     putchar('\n');
     

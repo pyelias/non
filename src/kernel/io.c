@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stddef.h>
 
 #define outb(port, data) asm volatile ("outb %%al,%%dx" : : "a" (data), "d" (port))
 
@@ -33,13 +34,13 @@ void putchar(char c) {
     outb(COM1, c);
 }
 
-void putstr(char* str) {
+void putstr(const char* str) {
     for (; *str; str++) {
         putchar(*str);
     }
 }
 
-void putint_with_base(long n, int base) {
+void putint_with_base(int64_t n, uint8_t base) {
     if (n < 0) {
         n = -n;
         putchar('-');
@@ -59,7 +60,7 @@ void putint_with_base(long n, int base) {
     }
 }
 
-void putuint_with_base(unsigned long n, int base) {
+void putuint_with_base(uint64_t n, int base) {
     char digits[30];
     int i = 30;
     if (n == 0) {
@@ -74,10 +75,10 @@ void putuint_with_base(unsigned long n, int base) {
     }
 }
 
-void putint(long n) {
+void putint(int64_t n) {
     putint_with_base(n, 10);
 }
 
-void putuint(unsigned long n) {
+void putuint(uint64_t n) {
     putuint_with_base(n, 10);
 }

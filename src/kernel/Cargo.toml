@@ -1,0 +1,9 @@
+[package]
+name = "sparkle"
+version = "0.1.0"
+
+[lib]
+name = "kernel_rs"
+path = "lib.rs"
+edition = "2021"
+crate-type = ["staticlib"]

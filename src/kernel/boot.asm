@@ -7,20 +7,20 @@ MAGIC       equ 0x1BADB002
 CHECKSUM    equ -(MAGIC + FLAGS)
 
 ; multiboot header
-section .multiboot
+[section .multiboot alloc noexec nowrite progbits align=4]
 align 4
     dd MAGIC
     dd FLAGS
     dd CHECKSUM
 
 ; space for a small stack
-[section .bootstrap_bss nobits alloc noexec write align=4]
+[section .bootstrap_bss alloc noexec write nobits align=4]
 align 16
 stack_bottom:
 resb 1 << 16
 stack_top:
 
-[section .bootstrap_text progbits alloc exec nowrite align=16]
+[section .bootstrap_text alloc exec nowrite progbits align=16]
 global _start:function (_start.end - _start)
 _start:
     mov esp, stack_top ; setup stack
@@ -40,15 +40,26 @@ _start:
     mov esi, err_no_long_mode
     jz error
 
+    ; todo make this work
+    ; call load_tss
+
     call set_up_paging
 
     call prepare_for_long_mode
 
-    ; now use the GDT to jump to 64-bit mode
+    ; load the GDT with a 32 bit physical address
     lgdt [GDT.desc]
+    ; use the GDT to jump to 64-bit mode
     jmp GDT.long_mode_code:.in_long_mode
 .in_long_mode:
     bits 64
+
+    ; reload the GDT, now with a 64 bit virtual address
+    extern HIGH_ID_MAP_VMA
+    add qword [GDT.desc_base_addr], HIGH_ID_MAP_VMA
+    lgdt [GDT.desc]
+
+    add rsp, HIGH_ID_MAP_VMA
     mov rax, call_kernel_main
     jmp rax
     bits 32
@@ -113,6 +124,28 @@ is_long_mode_supported:
 
 .no:
     xor eax, eax
+    ret
+
+load_tss:
+    ; lower half of TSS virt addr in eax
+    mov eax, TSS
+    or eax, 0x80000000
+
+    mov edi, GDT + GDT.TSS
+    mov [edi], word TSS.size-1 ; 16 bits limit
+    mov [edi + 2], word ax     ; 16 bits base
+    shr eax, 16                ;
+    mov [edi + 4], byte al     ; 8 bits base
+    mov [edi + 5], byte 0x89   ; 8 bits base
+    mov [edi + 6], byte 0      ; 4 bit limit + 4 bit flags
+    mov [edi + 7], byte ah     ; 8 bits base
+    mov [edi + 8], dword 0     ; 16 bits base
+    mov [edi + 12], dword 0    ; 16 bits base
+
+
+    mov eax, GDT.TSS
+    ; ltr ax
+
     ret
 
 set_up_paging:
@@ -186,6 +219,7 @@ prepare_for_long_mode:
 
     ret
 
+[section .bootstrap_data alloc noexec write progbits align=4]
 GDT:
     ; access bits
     .PRESENT    equ 1 << 7
@@ -200,20 +234,14 @@ GDT:
 
     .64_bit_TSS equ 0x9
 
-    ; args are base, limit, access and flags
-    %macro gdt_entry_full 4
-        dw %2                      ; 16 bits of limit
-        dw %1 & 0xFFFF             ; 16 bits of base
-        db (%1 >> 16) & 0xFF       ; 8 bits of base
-        db %3                      ; access byte
-        db (%4) | (%2 >> 16)       ; flags and 4 bits of limit
-        db (%1 >> 24) & 0xFF       ; 8 bits of base
-        dd (%1 >> 32) & 0xFFFFFFFF ; 32 bits of base
-        dd 0                       ; padding / reserved
-    %endmacro
-
+    ; args are access and flags
     %macro gdt_entry 2
-        gdt_entry_full 0, 0xFFFF, %1, %2
+        dw 0xFFFF     ; 16 bits of limit
+        dw 0          ; 16 bits of base
+        db 0          ; 8 bits of base
+        db %1         ; access byte
+        db (%2) | 0xF ; flags and 4 bits of limit
+        db 0          ; 8 bits of base
     %endmacro
 
     .null: equ $ - GDT
@@ -223,16 +251,20 @@ GDT:
     .data: equ $ - GDT
         gdt_entry (.PRESENT | .NOT_SYS | .RW), (.PAGE_GRAN | .SIZE_32)
     .TSS: equ $ - GDT
-        ; TODO point this somewhere with enough space for a tss
-        gdt_entry_full 0, 0, .64_bit_TSS, (.PAGE_GRAN | .SIZE_32)
+        dq 0, 0
 
     ; GDT descriptor
     .desc:
-        dw $ - GDT - 1  ; size - 1
-        dd GDT          ; location
+        dw $ - GDT - 1 ; size - 1
+    .desc_base_addr:
+        dq GDT         ; location
 ; this needs to be accessed from C
 global GDT_long_mode_code_offset
 GDT_long_mode_code_offset: equ GDT.long_mode_code
+
+TSS:
+    dq 13 dup 0
+    .size equ $ - TSS
 
 section .text
 call_kernel_main:

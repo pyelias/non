@@ -1,5 +1,9 @@
 CC = x86_64-elf-gcc
-CFLAGS = -MMD -m64 -c -ffreestanding -mcmodel=kernel -mno-red-zone -O2 -Wall -Wextra
+CFLAGS =  -c -ffreestanding -MMD 
+CFLAGS += -m64 -mcmodel=kernel -mno-red-zone -mabi=sysv -msoft-float
+# don't use float registers, interrupt handlers don't save them
+CFLAGS += -mno-sse -mno-mmx -mno-sse2 -mno-3dnow -mno-avx
+CFLAGS += -O2 -Wall -Wextra
 AS = nasm
 ASFLAGS = -f elf64 -w+orphan-labels
 
@@ -9,8 +13,10 @@ KERNEL_DEP_DIR = build/deps/kernel
 
 kernel_c_src = $(wildcard $(KERNEL_SRC_DIR)/*.c)
 kernel_asm_src = $(wildcard $(KERNEL_SRC_DIR)/*.asm)
+kernel_rs_src = $(wildcard $(KERNEL_SRC_DIR)/*.rs)
 kernel_obj =  $(kernel_c_src:$(KERNEL_SRC_DIR)/%.c=$(KERNEL_OBJ_DIR)/%.c.o)
 kernel_obj += $(kernel_asm_src:$(KERNEL_SRC_DIR)/%.asm=$(KERNEL_OBJ_DIR)/%.asm.o)
+kernel_obj += $(KERNEL_OBJ_DIR)/libkernel_rs.a
 kernel_dep =  $(src:src/%.c=$(KERNEL_DEP_DIR)/%.c.d)
 kernel_dep += $(src:src/%.asm=$(KERNEL_DEP_DIR)/%.asm.d)
 
@@ -25,6 +31,9 @@ $(KERNEL_OBJ_DIR)/%.c.o: $(KERNEL_SRC_DIR)/%.c $(KERNEL_OBJ_DIR)
 
 $(KERNEL_OBJ_DIR)/%.asm.o: $(KERNEL_SRC_DIR)/%.asm $(KERNEL_OBJ_DIR) $(KERNEL_DEP_DIR)
 	$(AS) $(ASFLAGS) -MD $(KERNEL_DEP_DIR)/$*.asm.d -o $@ $<
+
+$(KERNEL_OBJ_DIR)/libkernel_rs.a: $(kernel_rs_src)
+	cargo +nightly build -q -p sparkle --profile dev --out-dir=$(KERNEL_OBJ_DIR) -Z unstable-options
 
 $(KERNEL_OBJ_DIR) $(KERNEL_DEP_DIR):
 	mkdir -p $@

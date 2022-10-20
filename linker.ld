@@ -1,7 +1,7 @@
 ENTRY(_start)
 
 BOOTSTRAP_LMA = 1M;
-KERNEL_VMA = 0xFFFFFFFFC0000000;
+HIGH_ID_MAP_VMA = 0xFFFFFFFFC0000000;
 
 SECTIONS
 {
@@ -17,9 +17,14 @@ SECTIONS
         *(.bootstrap_bss)
     }
 
+    .bootstrap_data ALIGN(4K) :
+    {
+        *(.bootstrap_data)
+    }
+
     .bootstrap_rodata ALIGN(4K) :
     {
-        *(.bootstrap_rodata)
+        *(.bootstrap_data)
     }
 
     . = ALIGN(4K);
@@ -28,7 +33,7 @@ SECTIONS
     /* relocate kernel code so that
        the top 2GB of virtual memory can map to the bottom 2GB of physical
     */
-    . = KERNEL_VMA + KERNEL_LMA;
+    . = HIGH_ID_MAP_VMA + KERNEL_LMA;
 
     .text ALIGN(4K) : AT(KERNEL_LMA)
     {

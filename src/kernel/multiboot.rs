@@ -4,27 +4,27 @@ use crate::types::{HasPhysAddr, HasVirtAddr, PhysAddr};
 
 #[repr(C)]
 #[derive(Copy, Clone)]
-struct AOutSymbolTable {
-    tabsize: u32,
-    strsize: u32,
-    addr: u32,
-    reserved: u32
+pub struct AOutSymbolTable {
+    pub tabsize: u32,
+    pub strsize: u32,
+    pub addr: u32,
+    pub reserved: u32
 }
 
 #[repr(C)]
 #[derive(Copy, Clone)]
-struct ElfSectionHeaderTable {
-    num: u32,
-    size: u32,
-    addr: u32,
-    shndx: u32
+pub struct ElfSectionHeaderTable {
+    pub num: u32,
+    pub size: u32,
+    pub addr: u32,
+    pub shndx: u32
 }
 
 #[repr(C)]
 #[derive(Copy, Clone)]
-union SymbolTable {
-    aout_sym: AOutSymbolTable,
-    elf_sec: ElfSectionHeaderTable
+pub union SymbolTable {
+    pub aout_sym: AOutSymbolTable,
+    pub elf_sec: ElfSectionHeaderTable
 }
 
 const HAS_MMAP_FLAG: u32 = 1 << 6;
@@ -32,16 +32,20 @@ const HAS_MMAP_FLAG: u32 = 1 << 6;
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct Info {
-    flags: u32,
-    mem_lower: u32,
-    mem_upper: u32,
-    boot_device: u32,
-    cmdline: u32,
-    mods_count: u32,
-    mods_addr: u32,
-    syms: SymbolTable,
-    mmap_length: u32,
-    mmap_addr: u32,
+    pub flags: u32,
+    pub mem_lower: u32,
+    pub mem_upper: u32,
+    pub boot_device: u32,
+    pub cmdline: u32,
+    pub mods_count: u32,
+    pub mods_addr: u32,
+    pub syms: SymbolTable,
+    pub mmap_length: u32,
+    pub mmap_addr: u32,
+    pub drives_length: u32,
+    pub drives_addr: u32,
+    pub config_table: u32,
+    pub boot_loader_name: u32,
     // more, but i don't need them right now
 }
 

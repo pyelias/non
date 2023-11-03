@@ -31,13 +31,13 @@ void verify_frame_ptr(phys_ptr frame) {
 
 // a group avail is either 0 if completely full, or order+1 if a sub-page is available with that order
 void set_group_avail(group_num group, group_size size, int avail) {
-    /*putstr("setting group ");
+    /* putstr("setting group ");
     putint_with_base(group, 4);
     putstr(" with size ");
     putint(size);
     putstr(" to avail ");
     putint(avail);
-    putchar('\n');*/
+    putchar('\n'); */
     if (size == 0) {
         size_t group_entry = group / 64;
         int entry_pos = group % 64;
@@ -57,9 +57,9 @@ void set_group_avail(group_num group, group_size size, int avail) {
         group_maps[size][group_entry] &= ~((group_map_entry)15 << entry_pos);
         group_maps[size][group_entry] |= (uint64_t)avail << entry_pos;
     }
-    /*putstr("is now ");
+    /* putstr("is now ");
     putint(get_group_avail(group, size));
-    putchar('\n');*/
+    putchar('\n'); */
 }
 
 int get_group_avail(group_num group, group_size size) {
@@ -119,11 +119,11 @@ void update_all_parents(group_num group, group_size size) {
 }
 
 void free_phys_page(frame_ptr page, page_order order) {
-    /*putstr("freeing ");
+    /* putstr("freeing ");
     putuint_with_base(page, 16);
     putstr(" with order ");
     putint(order);
-    putchar('\n');*/
+    putchar('\n'); */
     // order must be multiple of two for now, todo improve
     group_size size = order / 2;
 
@@ -291,7 +291,7 @@ extern void flush_tlb(void);
 extern void get_usable_memory(multiboot_info_t *multiboot_info, frame_ptr* low_frame, frame_ptr* high_frame);
 
 void mm_init(multiboot_info_t *multiboot_info) {
-    // clear low-address identity mapping setup during boot
+    // clear low-address identity mapping set up during boot
     // it's probably fine to just leave it but i dont want to
     volatile pt_entry* ptl4 = PHYS_TO_VIRT(0x1000);
     ptl4[0] = 0;

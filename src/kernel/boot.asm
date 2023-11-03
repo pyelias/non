@@ -29,6 +29,7 @@ _start:
     push eax
     push ebx
 
+    ; test output to screen
     mov byte [0xB8500], 'a'
     mov byte [0xB8501], 7 ; light grey on black
 
@@ -41,7 +42,7 @@ _start:
     jz error
 
     ; todo make this work
-    ; call load_tss
+    call load_tss
 
     call set_up_paging
 
@@ -130,21 +131,20 @@ load_tss:
     ; lower half of TSS virt addr in eax
     mov eax, TSS
     or eax, 0x80000000
+    mov eax, GDT.TSS
 
     mov edi, GDT + GDT.TSS
     mov [edi], word TSS.size-1 ; 16 bits limit
     mov [edi + 2], word ax     ; 16 bits base
     shr eax, 16                ;
     mov [edi + 4], byte al     ; 8 bits base
-    mov [edi + 5], byte 0x89   ; 8 bits base
+    mov [edi + 5], byte 0x89   ; access byte
     mov [edi + 6], byte 0      ; 4 bit limit + 4 bit flags
     mov [edi + 7], byte ah     ; 8 bits base
     mov [edi + 8], dword 0     ; 16 bits base
     mov [edi + 12], dword 0    ; 16 bits base
 
-
-    mov eax, GDT.TSS
-    ; ltr ax
+    ltr ax
 
     ret
 

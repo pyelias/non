@@ -1,0 +1,14 @@
+simple allocator can:
+ - map single page
+ - map two consecutive pages
+(these are done from different slab-buffer-things, probably)
+
+l1 tables use single pages
+
+high level tables use 2 pages
+1st page is a table
+2nd page is pointers to subtables
+
+
+complex allocator:
+uses a buddy-system-style trie

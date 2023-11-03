@@ -5,6 +5,7 @@
 #include "int.h"
 
 extern void print_all_mmap_elements(multiboot_info_t *info);
+extern void kernel_main_rust(multiboot_info_t *info);
 
 void kernel_main(uint32_t multiboot_info_phys, uint32_t magic) {
     multiboot_info_t *multiboot_info = PHYS_TO_VIRT(multiboot_info_phys);
@@ -16,17 +17,14 @@ void kernel_main(uint32_t multiboot_info_phys, uint32_t magic) {
     }
 
     putstr("in kernel now\n");
-    putint_with_base(multiboot_info->flags, 2);
-    putchar('\n');
-    putint(multiboot_info->mmap_addr);
-    putchar('\n');
-    putstr(PHYS_TO_VIRT(multiboot_info->boot_loader_name));
-    putchar('\n');
-    print_all_mmap_elements(multiboot_info);
-    putchar('\n');
 
     idt_init();
-    mm_init(multiboot_info);
+
+    //mm_init(multiboot_info);
+    kernel_main_rust(multiboot_info);
+    return;
+    // old C mm
+    /* mm_init(multiboot_info);
     putstr("all init done\n");
 
     print_alloc_state(4);
@@ -47,7 +45,7 @@ void kernel_main(uint32_t multiboot_info_phys, uint32_t magic) {
 
     putstr("page1: ");
     putuint_with_base((size_t)page1, 16);
-    putchar('\n');
+    putchar('\n');*/
 
     putstr("causing a page fault\n");
     putstr("error message next, hopefully\n");

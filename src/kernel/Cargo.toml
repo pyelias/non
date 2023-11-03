@@ -2,6 +2,9 @@
 name = "sparkle"
 version = "0.1.0"
 
+[dependencies]
+paste = "1.0"
+
 [lib]
 name = "kernel_rs"
 path = "lib.rs"

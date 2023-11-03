@@ -1,0 +1,43 @@
+round-robin with priority
+
+thread vs execution context
+thread has scheduling info
+execution context has stack + address space + ...
+a thread has a stack of ex conts, not every ex cont always has a thread
+
+each thread has a currently-available time and a refill amount
+when a thread reaches the front of the queue, the refill amount is added to its available time (available can't go above refill, but can be negative)
+it is run until it yields or runs out of time
+then the used time is subtracted from the available time and the thread is moved to the back of the queue
+
+if a high-priority thread is blocked by low-priority thread, we run the low-priority thread:
+ - with the high priority
+ - subtracting from the low-priority thread's time (maybe? could also take from the high-pri thread, but the intention is to penalize budget expiry)
+   - this is why available time can be negative
+   - the available time can't be allowed to decrease forever, low-priority threads shouldn't be able to get unlimited high-priority free time
+   - so put a lower limit on negative time
+   - A: if time runs out, should it temporarily give up on running the high-priority thread?
+   - B: or should the low-priority thread be terminated for misbehaving? (after this, the high priority thread can't be run)
+
+maybe it doesn't matter
+if a thread wants guaranteed-latency access to an unpredictable-latency resource, it can/should make its own instance of it
+this is easy, and simple when you don't want guaranteed-latency (just want best-effort low latency)
+
+go with option A when no negative time available
+and maybe notify something that can log it, terminate / restart, etc.
+
+
+when running something, there is:
+ - a priority (determines when preemption happens)
+ - a time-slice (decides when to stop running, determines who pays for the time used)
+
+each thread:
+ - has avail time + refill
+ - has priority (i think)
+ - tracks the execution context currently running in it, what context that returns to, etc
+
+(i find out now that this is called thread migration)
+execution contexts can be thought of as resources that need to be allocated to threads (by priority, probably)
+
+
+(this is all per-core, units don't move between cores unless they do) (but that's complicated and i'll think about it later)

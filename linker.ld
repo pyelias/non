@@ -12,11 +12,6 @@ SECTIONS
         *(.bootstrap_text)
     }
 
-    .bootstrap_bss ALIGN(4K) :
-    {
-        *(.bootstrap_bss)
-    }
-
     .bootstrap_data ALIGN(4K) :
     {
         *(.bootstrap_data)
@@ -24,7 +19,12 @@ SECTIONS
 
     .bootstrap_rodata ALIGN(4K) :
     {
-        *(.bootstrap_data)
+        *(.bootstrap_rodata)
+    }
+
+    .bootstrap_bss ALIGN(4K) :
+    {
+        *(.bootstrap_bss)
     }
 
     . = ALIGN(4K);
@@ -37,22 +37,22 @@ SECTIONS
 
     .text ALIGN(4K) : AT(KERNEL_LMA)
     {
-        *(.text)
+        *(.text*)
     }
 
     .data ALIGN(4K) :
     {
-        *(.data)
+        *(.data*)
     }
 
     .rodata ALIGN(4K) :
     {
-        *(.rodata)
+        *(.rodata*)
     }
 
     .bss ALIGN(4K) :
     {
-        *(.bss)
+        *(.bss*)
     }
 
     KERNEL_END_VMA = .;

@@ -11,9 +11,9 @@ KERNEL_SRC_DIR = src/kernel
 KERNEL_OBJ_DIR = build/objs/kernel
 KERNEL_DEP_DIR = build/deps/kernel
 
-kernel_c_src = $(wildcard $(KERNEL_SRC_DIR)/*.c)
-kernel_asm_src = $(wildcard $(KERNEL_SRC_DIR)/*.asm)
-kernel_rs_src = $(wildcard $(KERNEL_SRC_DIR)/*.rs)
+kernel_c_src = $(shell find $(KERNEL_SRC_DIR) -name *.c)
+kernel_asm_src = $(shell find $(KERNEL_SRC_DIR) -name *.asm)
+kernel_rs_src = $(shell find $(KERNEL_SRC_DIR) -name *.rs)
 kernel_obj =  $(kernel_c_src:$(KERNEL_SRC_DIR)/%.c=$(KERNEL_OBJ_DIR)/%.c.o)
 kernel_obj += $(kernel_asm_src:$(KERNEL_SRC_DIR)/%.asm=$(KERNEL_OBJ_DIR)/%.asm.o)
 kernel_obj += $(KERNEL_OBJ_DIR)/libkernel_rs.a

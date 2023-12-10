@@ -1,14 +1,24 @@
-simple allocator can:
- - map single page
- - map two consecutive pages
-(these are done from different slab-buffer-things, probably)
+A L3: B _ _ _
+B L2: D 3 7 11
+C SUBTABLES
+D L1: 0 1 2 3
 
-l1 tables use single pages
+0 PAGE
+1 PAGE
+2 PAGE
+3 L1: 4 5 6 7
+4 PAGE
+5 PAGE
+6 PAGE
+7 L1: 8 9 10 11
+8 PAGE
+9 PAGE
+10 PAGE
+11 L1: 12 13 14 15
+12 PAGE
+13 L2: 15 19 23 27
+14 subtables
+15 L1: 16 17 18 19
 
-high level tables use 2 pages
-1st page is a table
-2nd page is pointers to subtables
 
-
-complex allocator:
-uses a buddy-system-style trie
+ath l1 entry maps page at address l1_entry_addr(a)

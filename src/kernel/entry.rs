@@ -4,8 +4,8 @@ use core::ffi::CStr;
 use core::mem::MaybeUninit;
 
 use crate::multiboot;
-use crate::types::{self, HasPhysAddr, HasVirtAddr, Entry, PageEntry, Flags, LargePageEntryFlags};
-use crate::mm::{self, frame_alloc, page_alloc, alloc_frame_with_order, free_frame_with_order, FrameOrder, alloc_page};
+use crate::types::{HasPhysAddr, HasVirtAddr, page_table::Entry};
+use crate::mm::{self, frame_alloc, page_alloc, alloc_frame_with_order, FrameOrder, alloc_page};
 use crate::task::{TCB, switch_to_task};
 
 fn print_mmap_element(entry: &multiboot::MMapEntry) {
@@ -63,7 +63,7 @@ extern "sysv64" fn kernel_main_rust(info: &multiboot::Info) {
     println!("order-9 frame: {}", frame);
     let (l2_entry, big_page_addr) = mm::alloc_l2_entry().unwrap();
     println!("l2 entry vaddr: {}", big_page_addr);
-    *l2_entry = PageEntry::at_frame(frame).with_flags(LargePageEntryFlags::none().present()).to_generic();
+    *l2_entry = Entry::at_frame(frame);
     let big_page = unsafe { &mut *big_page_addr.ptr::<[MaybeUninit<u8>; 1<<21]>() };
     let seg = unsafe { mm::Segment::make_small_alloc(&mut big_page[..]) };
     /*let slab = unsafe { seg.alloc_slab(Layout::new::<usize>()) }.unwrap();
@@ -90,9 +90,6 @@ extern "sysv64" fn kernel_main_rust(info: &multiboot::Info) {
 
     println!("switching now");
     unsafe { switch_to_task(&mut curr_tcb_reg, &mut next_tcb) };
-
-    core::mem::drop(slab);
-    core::mem::drop(seg);
 }
 
 fn hello_world_task() {

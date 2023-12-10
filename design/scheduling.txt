@@ -21,7 +21,7 @@ if a high-priority thread is blocked by low-priority thread, we run the low-prio
 
 maybe it doesn't matter
 if a thread wants guaranteed-latency access to an unpredictable-latency resource, it can/should make its own instance of it
-this is easy, and simple when you don't want guaranteed-latency (just want best-effort low latency)
+this is easy and simple when you don't want guaranteed-latency (just want best-effort low latency)
 
 go with option A when no negative time available
 and maybe notify something that can log it, terminate / restart, etc.

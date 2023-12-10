@@ -1,10 +1,6 @@
 #![no_std]
-#![feature(pointer_byte_offsets)]
 #![feature(const_option)]
 #![feature(panic_info_message)]
-#![feature(slice_take)]
-#![feature(const_maybe_uninit_zeroed)]
-#![feature(return_position_impl_trait_in_trait)]
 #![feature(maybe_uninit_slice)]
 #![feature(alloc_layout_extra)]
 
@@ -14,11 +10,11 @@ use core::fmt::{write, Write};
 #[macro_use]
 mod io;
 mod types;
+mod data_structures;
 mod multiboot;
 mod entry;
 mod mm;
 mod sync;
-mod cpu;
 mod task;
 
 #[panic_handler]

@@ -1,8 +1,4 @@
-use core::marker::PhantomData;
-use core::default::Default;
-use core::ptr::slice_from_raw_parts_mut;
-
-use crate::types::{self, HasPhysAddr, HasVirtAddr, FrameAddr, PageTable, Entry, PageEntry};
+use crate::types::{self, HasPhysAddr, HasVirtAddr, FrameAddr, page_table::{PageTable, Entry}};
 use crate::multiboot::{self, MMapEntryType};
 use crate::sync::SpinLock;
 use crate::mm::bump_alloc::BumpAllocator;
@@ -19,7 +15,7 @@ extern "sysv64" fn get_usable_memory(info: &multiboot::Info, low_frame: &mut Fra
     // safe because we don't care about the values of those things
     // just their addresses
     let kernel_phys_end = unsafe { core::ptr::addr_of!(KERNEL_END_VMA).usize() - core::ptr::addr_of!(HIGH_ID_MAP_VMA).usize() };
-    *low_frame = kernel_phys_end.containing_frame().next_frame();
+    *low_frame = kernel_phys_end.phys_addr().align::<FrameAddr>().next(1);
 
     let mut high_addr = 0;
     for entry in info.mmap_entries() {
@@ -28,7 +24,7 @@ extern "sysv64" fn get_usable_memory(info: &multiboot::Info, low_frame: &mut Fra
             high_addr = core::cmp::max(high_addr, { entry.addr }.usize() + entry.len);
         }
     }
-    *high_frame = high_addr.containing_frame();
+    *high_frame = high_addr.phys_addr().align::<FrameAddr>();
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
@@ -86,12 +82,12 @@ impl FrameOrder {
         Avail(self.0 + 1)
     }
 
-    fn page_shift(self) -> u8 {
-        self.0
+    fn page_shift(self) -> usize {
+        self.0 as usize
     }
 
     fn frame_at_idx(self, idx: usize) -> FrameAddr {
-        (idx << (types::page::PAGE_SHIFT + self.page_shift())).frame_addr()
+        0.phys_addr().as_aligned::<FrameAddr>().next(idx << self.page_shift())
     }
 
     fn idx_of_frame(self, frame: FrameAddr) -> usize {
@@ -303,17 +299,17 @@ pub unsafe fn init(multiboot_info: &multiboot::Info) {
     // clear low-address identity mapping set up during boot
     // it's probably fine to just leave it but i dont want to
     let ptl4: &mut PageTable = unsafe { &mut *0x1000usize.to_virt().ptr() };
-    ptl4[0].write(PageEntry::empty().to_generic());
+    ptl4[0].write(Entry::empty());
     let ptl3: &mut PageTable = unsafe { &mut *0x2000usize.to_virt().ptr() };
-    ptl3[0].write(PageEntry::empty().to_generic());
+    ptl3[0].write(Entry::empty());
     
     extern "sysv64" {
         fn flush_tlb();
     }
     unsafe { flush_tlb() };
 
-    let mut low_frame = 0usize.frame_addr();
-    let mut high_frame = 0usize.frame_addr();
+    let mut low_frame = 0usize.phys_addr().as_aligned::<FrameAddr>();
+    let mut high_frame = low_frame;
     get_usable_memory(multiboot_info, &mut low_frame, &mut high_frame);
     println!("low_frame:  {}", low_frame);
     println!("high_frame: {}", high_frame);
@@ -328,7 +324,7 @@ pub unsafe fn init(multiboot_info: &multiboot::Info) {
     let mut map_alloc = unsafe { BumpAllocator::new(bitmap_start_ptr, mem_length) };
     setup_bitmap_frame_allocator(&mut map_alloc, frame_count);
     let bitmap_end_ptr = map_alloc.done_ptr();
-    let low_frame = bitmap_end_ptr.to_phys().containing_frame().next_frame();
+    let low_frame = bitmap_end_ptr.to_phys().align::<FrameAddr>().next(1);
 
     println!("low_frame:  {}", low_frame);
     println!("high_frame: {}", high_frame);
@@ -337,6 +333,6 @@ pub unsafe fn init(multiboot_info: &multiboot::Info) {
     let mut curr_frame = low_frame;
     for _ in 0..frame_count {
         free_frame(curr_frame);
-        curr_frame = curr_frame.next_frame();
+        curr_frame = curr_frame.next(1);
     }
 }

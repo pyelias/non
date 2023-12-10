@@ -1,6 +1,7 @@
 use core::{ptr::NonNull, alloc::Layout, mem::{size_of, align_of, MaybeUninit}, pin::Pin, marker::PhantomPinned, cell::UnsafeCell};
 
 use super::bump_alloc::BumpAllocator;
+use crate::data_structures::IntrinsicLinkedList;
 
 const SMALL_ALLOC_SEG_SIZE: usize = 1 << 21;
 const SMALL_ALLOC_SLAB_SHIFT: usize = 16;
@@ -43,7 +44,7 @@ impl Slab {
         let obj_buffer = alloc.alloc_slice_layout(layout, obj_count);
         let mut avail_list = ObjList::new();
         for i in 0..obj_count {
-            let obj_ptr = obj_buffer.wrapping_byte_add(layout.size() * i);
+            let obj_ptr = (obj_buffer as *mut u8).wrapping_add(layout.size() * i) as *mut ();
             unsafe { avail_list.push(obj_ptr) };
         }
         Slab {

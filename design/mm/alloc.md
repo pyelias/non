@@ -43,3 +43,6 @@ the address space thing
 
 page_alloc and the address space thing can use a shared tool (page table manager) to do the mapping
 it's only the allocation patterns that are different
+
+design these for concurrency
+use thread-local caches where possible

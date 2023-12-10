@@ -1,5 +1,6 @@
 use core::fmt::Display;
-use super::page::{PAGE_SIZE, PAGE_LOW_MASK, PAGE_HIGH_MASK};
+use super::page::PAGE_SHIFT;
+use super::page_table::PTE_INDEX_SIZE;
 
 const ID_MAP_SIZE: usize = 1 << 30;
 // must equal HIGH_ID_MAP_VMA from linker
@@ -8,52 +9,53 @@ const VIRT_ADDR_BITS: usize = 48;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
-pub struct PhysAddr(usize);
+pub struct Alignment(usize);
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug)]
-pub struct VirtAddr(usize);
+impl Alignment {
+    #[inline(always)]
+    pub fn mask(&self) -> usize {
+        (1 << self.0) - 1
+    }
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug)]
-pub struct FrameAddr(usize);
+    #[inline(always)]
+    pub fn high_mask(&self) -> usize {
+        !self.mask()
+    }
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug)]
-pub struct PageAddr(usize);
-
-impl FrameAddr {
-    pub fn next_frame(self) -> Self {
-        Self(self.0 + PAGE_SIZE)
+    pub fn size(&self) -> usize {
+        1 << self.0
     }
 }
 
-impl PageAddr {
-    pub fn next_page(self) -> Self {
-        Self(self.0 + PAGE_SIZE)
-    }
-}
+const PAGE_ALIGNMENT: Alignment = Alignment(PAGE_SHIFT);
+const PTL2_ALIGNMENT: Alignment = Alignment(PAGE_SHIFT + PTE_INDEX_SIZE);
+const PTL3_ALIGNMENT: Alignment = Alignment(PAGE_SHIFT + PTE_INDEX_SIZE * 2);
+const PTL4_ALIGNMENT: Alignment = Alignment(PAGE_SHIFT + PTE_INDEX_SIZE * 3);
 
 pub trait HasPhysAddr {
     fn usize(&self) -> usize;
 
-    // if we're using a usize as phys addr, we want to be able to Display it like a PhysAddr
-    // but a FrameAddr should still be displayed like a FrameAddr
-    fn display(&self) -> impl Display {
-        self.phys_addr()
-    }
-
+    #[inline(always)]
     fn phys_addr(&self) -> PhysAddr {
         PhysAddr(self.usize())
     }
 
-    fn try_frame_addr(&self) -> Option<FrameAddr> {
-        self.is_frame_aligned().then_some(FrameAddr(self.usize()))
+    #[inline(always)]
+    fn try_as_aligned<A: AlignedPhys>(&self) -> Option<A> {
+        if !self.is_aligned(A::ALIGNMENT) {
+            return None;
+        }
+        Some(A::from_usize(self.usize()))
     }
 
-    fn frame_addr(&self) -> FrameAddr {
-        assert!(self.is_frame_aligned(), "tried to make a FrameAddr with an unaligned address: {}", self.phys_addr());
-        FrameAddr(self.usize())
+    #[inline(always)]
+    fn as_aligned<A: AlignedPhys>(&self) -> A {
+        self.try_as_aligned().unwrap_or_else(|| panic!("unaligned address: {}", self.phys_addr()))
+    }
+
+    #[inline(always)]
+    fn align<A: AlignedPhys>(&self) -> A {
+        A::from_usize(self.usize() & A::ALIGNMENT.high_mask())
     }
 
     fn to_virt(&self) -> VirtAddr {
@@ -63,55 +65,52 @@ pub trait HasPhysAddr {
         VirtAddr(addr + HIGH_ID_MAP_ADDR)
     }
 
-    fn frame_offset(&self) -> usize {
-        self.usize() & PAGE_LOW_MASK
+    #[inline(always)]
+    fn align_offset(&self, alignment: Alignment) -> usize {
+        self.usize() & alignment.mask()
     }
 
-    fn is_frame_aligned(&self) -> bool {
-        self.frame_offset() == 0
-    }
-
-    fn containing_frame(&self) -> FrameAddr {
-        FrameAddr(self.usize() & PAGE_HIGH_MASK)
+    #[inline(always)]
+    fn is_aligned(&self, alignment: Alignment) -> bool {
+        self.align_offset(alignment) == 0
     }
 }
 
-impl HasPhysAddr for usize {
-    fn usize(&self) -> usize { *self }
-}
+pub trait AlignedPhys: HasPhysAddr {
+    const ALIGNMENT: Alignment;
 
-impl HasPhysAddr for PhysAddr {
-    fn usize(&self) -> usize { self.0 }
-}
-
-impl HasPhysAddr for FrameAddr {
-    fn usize(&self) -> usize { self.0 }
-
-    fn display(&self) -> Self { *self }
+    fn from_usize(n: usize) -> Self;
 }
 
 pub trait HasVirtAddr {
     fn usize(&self) -> usize;
 
-    fn display(&self) -> impl Display {
-        self.virt_addr()
-    }
-
+    #[inline(always)]
     fn ptr<T>(&self) -> *mut T {
         self.usize() as *mut T
     }
 
+    #[inline(always)]
     fn virt_addr(&self) -> VirtAddr {
         VirtAddr(self.usize())
     }
 
-    fn try_page_addr(&self) -> Option<PageAddr> {
-        self.is_page_aligned().then_some(PageAddr(self.usize()))
+    #[inline(always)]
+    fn try_as_aligned<A: AlignedVirt>(&self) -> Option<A> {
+        if !self.is_aligned(A::ALIGNMENT) {
+            return None;
+        }
+        Some(A::from_usize(self.usize()))
     }
 
-    fn page_addr(&self) -> PageAddr {
-        assert!(self.is_page_aligned(), "tried to make a PageAddr with an unaligned address: {}", self.virt_addr());
-        PageAddr(self.usize())
+    #[inline(always)]
+    fn as_aligned<A: AlignedVirt>(&self) -> A {
+        self.try_as_aligned().unwrap_or_else(|| panic!("unaligned address: {}", self.virt_addr()))
+    }
+
+    #[inline(always)]
+    fn align<A: AlignedVirt>(&self) -> A {
+        A::from_usize(self.usize() & A::ALIGNMENT.high_mask())
     }
 
     fn to_phys(&self) -> PhysAddr {
@@ -121,20 +120,123 @@ pub trait HasVirtAddr {
         (addr - HIGH_ID_MAP_ADDR).phys_addr()
     }
 
-    fn page_offset(&self) -> usize {
-        self.usize() & PAGE_LOW_MASK
+    #[inline(always)]
+    fn align_offset(&self, alignment: Alignment) -> usize {
+        self.usize() & alignment.mask()
     }
 
-    fn is_page_aligned(&self) -> bool {
-        self.page_offset() == 0
-    }
-
-    fn containing_page(&self) -> PageAddr {
-        PageAddr(self.usize() & PAGE_HIGH_MASK)
+    #[inline(always)]
+    fn is_aligned(&self, alignment: Alignment) -> bool {
+        self.align_offset(alignment) == 0
     }
 }
 
+pub trait AlignedVirt: HasVirtAddr {
+    const ALIGNMENT: Alignment;
+
+    fn from_usize(n: usize) -> Self;
+}
+
+
+macro_rules! make_addr_struct {
+    ($name:ident) => {
+        #[repr(C)]
+        #[derive(Copy, Clone, Debug)]
+        pub struct $name(usize);
+    };
+}
+
+macro_rules! impl_addr_trait {
+    ($name:ident, $trait:ident) => {
+        impl $trait for $name {
+            #[inline(always)]
+            fn usize(&self) -> usize {
+                self.0
+            }
+        }
+    };
+}
+
+macro_rules! impl_aligned {
+    ($name:ident, $trait:ident, $alignment:ident) => {
+        impl $trait for $name {
+            const ALIGNMENT: Alignment = $alignment;
+
+            #[inline(always)]
+            fn from_usize(n: usize) -> Self {
+                Self(n & $alignment.high_mask())
+            }
+        }
+
+        impl $name {
+            pub fn next(self, off: usize) -> Self {
+                Self(self.0 + $alignment.size() * off)
+            }
+        
+            pub fn prev(self, off: usize) -> Self {
+                Self(self.0 - $alignment.size() * off)
+            }
+        
+            pub fn offset(self, off: isize) -> Self {
+                Self((self.0 as isize + $alignment.size() as isize * off) as usize)
+            }
+        }
+    };
+}
+
+macro_rules! impl_display {
+    ($name:ident, $cast_method:ident) => {
+        impl Display for $name {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                self.$cast_method().fmt(f)
+            }
+        }
+    };
+}
+
+make_addr_struct!(PhysAddr);
+impl_addr_trait!(PhysAddr, HasPhysAddr);
+
+make_addr_struct!(VirtAddr);
+impl_addr_trait!(VirtAddr, HasVirtAddr);
+
+make_addr_struct!(FrameAddr);
+make_addr_struct!(PTL2FrameAddr);
+make_addr_struct!(PTL3FrameAddr);
+make_addr_struct!(PTL4FrameAddr);
+impl_display!(FrameAddr, phys_addr);
+impl_display!(PTL2FrameAddr, phys_addr);
+impl_display!(PTL3FrameAddr, phys_addr);
+impl_display!(PTL4FrameAddr, phys_addr);
+impl_addr_trait!(FrameAddr, HasPhysAddr);
+impl_addr_trait!(PTL2FrameAddr, HasPhysAddr);
+impl_addr_trait!(PTL3FrameAddr, HasPhysAddr);
+impl_addr_trait!(PTL4FrameAddr, HasPhysAddr);
+impl_aligned!(FrameAddr, AlignedPhys, PAGE_ALIGNMENT);
+impl_aligned!(PTL2FrameAddr, AlignedPhys, PTL2_ALIGNMENT);
+impl_aligned!(PTL3FrameAddr, AlignedPhys, PTL3_ALIGNMENT);
+impl_aligned!(PTL4FrameAddr, AlignedPhys, PTL3_ALIGNMENT);
+
+make_addr_struct!(PageAddr);
+make_addr_struct!(PTL2PageAddr);
+make_addr_struct!(PTL3PageAddr);
+make_addr_struct!(PTL4PageAddr);
+impl_display!(PageAddr, virt_addr);
+impl_display!(PTL2PageAddr, virt_addr);
+impl_display!(PTL3PageAddr, virt_addr);
+impl_display!(PTL4PageAddr, virt_addr);
+impl_addr_trait!(PageAddr, HasVirtAddr);
+impl_addr_trait!(PTL2PageAddr, HasVirtAddr);
+impl_addr_trait!(PTL3PageAddr, HasVirtAddr);
+impl_addr_trait!(PTL4PageAddr, HasVirtAddr);
+impl_aligned!(PageAddr, AlignedVirt, PAGE_ALIGNMENT);
+impl_aligned!(PTL2PageAddr, AlignedVirt, PTL2_ALIGNMENT);
+impl_aligned!(PTL3PageAddr, AlignedVirt, PTL3_ALIGNMENT);
+impl_aligned!(PTL4PageAddr, AlignedVirt, PTL3_ALIGNMENT);
+
+
 impl HasVirtAddr for usize {
+    #[inline(always)]
     fn usize(&self) -> usize {
         let mut addr = *self;
         // sign extend to upper bits
@@ -146,41 +248,36 @@ impl HasVirtAddr for usize {
 }
 
 impl<T: ?Sized> HasVirtAddr for *const T {
+    #[inline(always)]
     fn usize(&self) -> usize {
         *self as *const () as usize
     }
 }
 
 impl<T: ?Sized> HasVirtAddr for *mut T {
+    #[inline(always)]
     fn usize(&self) -> usize {
         *self as *mut () as usize
     }
 }
 
 impl<T> HasVirtAddr for &T {
+    #[inline(always)]
     fn usize(&self) -> usize {
         *self as *const T as usize
     }
 }
 
 impl<T> HasVirtAddr for &mut T {
+    #[inline(always)]
     fn usize(&self) -> usize {
         *self as *const T as usize
     }
 }
 
-impl HasVirtAddr for VirtAddr {
-    fn usize(&self) -> usize {
-        self.0
-    }
-}
-
-impl HasVirtAddr for PageAddr {
-    fn usize(&self) -> usize {
-        self.0
-    }
-
-    fn display(&self) -> Self { *self }
+impl HasPhysAddr for usize {
+    #[inline(always)]
+    fn usize(&self) -> usize { *self }
 }
 
 impl Display for PhysAddr {
@@ -192,17 +289,5 @@ impl Display for PhysAddr {
 impl Display for VirtAddr {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "VA-{:016x}", self.0)
-    }
-}
-
-impl Display for FrameAddr {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "PF-{:016x}", self.0)
-    }
-}
-
-impl Display for PageAddr {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "VP-{:016x}", self.0)
     }
 }

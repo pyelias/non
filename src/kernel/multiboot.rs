@@ -57,7 +57,7 @@ impl Info {
         let head = (self.mmap_addr as usize).to_virt().ptr::<MMapEntry>();
         MMapIterator {
             curr: head,
-            end: head.wrapping_byte_add(self.mmap_length as usize),
+            end: (head as *const u8).wrapping_add(self.mmap_length as usize) as *const _,
             _marker: PhantomData
         }
     }
@@ -113,7 +113,7 @@ impl<'a> Iterator for MMapIterator<'a> {
         // properly formatted multiboot info will have valid entry pointers
         unsafe { 
             let res = &*self.curr;
-            self.curr = self.curr.byte_add(res.size as usize + 4);
+            self.curr = (self.curr as *const u8).add(res.size as usize + 4) as *const _;
             Some(res)
         }
     }

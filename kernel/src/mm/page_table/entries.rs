@@ -1,7 +1,6 @@
 use super::{EntryValue, NonPresentUsize, PTL1Entries, PTL2Entries, PTL3Entries, PTL1, PTL2, PTL3};
 use crate::types::{
-    page_table::Entry,
-    zeroable, HasVirtAddr, PTL2PageAddr, PTL3PageAddr, PTL4PageAddr, PageAddr,
+    page_table::Entry, zeroable, HasVirtAddr, PTL2PageAddr, PTL3PageAddr, PTL4PageAddr, PageAddr,
 };
 
 pub struct EntrySlot<'a>(&'a mut usize);

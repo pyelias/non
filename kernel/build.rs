@@ -6,9 +6,18 @@ const COMPILER: &'static str = "x86_64-elf-gcc";
 const ARCHIVER: &'static str = "x86_64-elf-ar";
 
 const C_FLAGS: &'static [&'static str] = &[
-    "-c", "-ffreestanding",
-    "-m64", "-mcmodel=kernel", "-mno-red-zone", "-mabi=sysv", "-msoft-float",
-    "-mno-sse", "-mno-mmx", "-mno-sse2", "-mno-3dnow", "-mno-avx"
+    "-c",
+    "-ffreestanding",
+    "-m64",
+    "-mcmodel=kernel",
+    "-mno-red-zone",
+    "-mabi=sysv",
+    "-msoft-float",
+    "-mno-sse",
+    "-mno-mmx",
+    "-mno-sse2",
+    "-mno-3dnow",
+    "-mno-avx",
 ];
 
 const C_SRC: &'static [&'static str] = &[
@@ -20,10 +29,7 @@ const C_SRC: &'static [&'static str] = &[
     "c_src/types.c",
 ];
 
-const ASM_FLAGS: &'static [&'static str] = &[
-    "-felf64",
-    "-w+orphan-labels"
-];
+const ASM_FLAGS: &'static [&'static str] = &["-felf64", "-w+orphan-labels"];
 
 const ASM_SRC: &'static [&'static str] = &[
     "asm_src/boot.asm",
@@ -60,7 +66,7 @@ fn build_asm() {
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
 
     let ar_path = out_dir.join("libsparkle_asm.a");
-    let _ =fs::remove_file(&ar_path);
+    let _ = fs::remove_file(&ar_path);
     let mut ar_cmd = Command::new(ARCHIVER);
     ar_cmd.env("ZERO_AR_DATE", "1");
     ar_cmd.arg("cq").arg(&ar_path);
@@ -92,5 +98,12 @@ fn main() {
     build_asm();
     mark_used_files();
 
-    println!("cargo:rustc-link-arg=-Tlinker.ld")
+    println!(
+        "cargo:rustc-link-arg=-T{}",
+        env::current_dir()
+            .unwrap()
+            .join("linker.ld")
+            .to_str()
+            .unwrap()
+    );
 }

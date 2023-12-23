@@ -11,13 +11,13 @@ use core::panic::PanicInfo;
 #[macro_use]
 mod io;
 
-mod types;
 mod data_structures;
 mod entry;
 mod mm;
 mod multiboot;
 mod sync;
 mod task;
+mod types;
 
 #[panic_handler]
 unsafe fn panic(info: &PanicInfo) -> ! {

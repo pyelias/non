@@ -1,7 +1,5 @@
 use super::alloc_frame;
-use super::page_table::{
-    PTL1Entries, PTL1EntrySlot, PTL2Entries, PTL3Entries, PTL1, PTL2,
-};
+use super::page_table::{PTL1Entries, PTL1EntrySlot, PTL2Entries, PTL3Entries, PTL1, PTL2};
 use crate::sync::SpinLock;
 use crate::types::{
     page_table::{pte_indices_to_addr, Entry},
@@ -101,8 +99,7 @@ pub unsafe fn init() {
     println!("mm virt s {}", allocator_start_addr);
 
     let l3_entries: &'static mut [usize; 511] = unsafe { &mut *(0x2000usize.to_virt()).ptr() };
-    let l3_entries =
-        PTL3Entries::from_entries_addr(l3_entries, allocator_start_addr.as_aligned());
+    let l3_entries = PTL3Entries::from_entries_addr(l3_entries, allocator_start_addr.as_aligned());
 
     let l2_table_frame_addr = (&INIT_PTL2).to_phys().as_aligned();
     let l1_table_frame_addr = (&INIT_PTL1).to_phys().as_aligned();

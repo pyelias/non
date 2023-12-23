@@ -2,7 +2,6 @@ mod addr;
 pub mod page;
 pub mod page_table;
 mod ptr;
-mod storage;
 pub mod zeroable;
 
 pub use addr::{
@@ -11,5 +10,4 @@ pub use addr::{
 };
 pub use page::Page;
 pub use ptr::{ptr_from_option_mut, ptr_from_option_ref};
-pub use storage::{DefaultSlot, FieldSlot, GetsField, Stores, StoresIn};
 pub use zeroable::Zeroable;

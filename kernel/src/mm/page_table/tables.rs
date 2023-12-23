@@ -1,7 +1,6 @@
 use super::{EntryValue, PTL1EntrySlot, PTL2EntrySlot, PTL3EntrySlot, PTL4EntrySlot};
 use crate::types::{
-    page_table::ENTRY_COUNT, PTL2PageAddr, PTL3PageAddr, PTL4PageAddr, PageAddr,
-    Zeroable,
+    page_table::ENTRY_COUNT, PTL2PageAddr, PTL3PageAddr, PTL4PageAddr, PageAddr, Zeroable,
 };
 
 #[repr(C, align(4096))]

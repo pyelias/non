@@ -1,7 +1,6 @@
 A L3: B _ _ _
-B L2: D 3 7 11
-C SUBTABLES
-D L1: 0 1 2 3
+B L2: C 3 7 11
+C L1: 0 1 2 3
 
 0 PAGE
 1 PAGE
@@ -16,8 +15,8 @@ D L1: 0 1 2 3
 10 PAGE
 11 L1: 12 13 14 15
 12 PAGE
-13 L2: 15 19 23 27
-14 subtables
+13 PAGE
+14 L2: 15 19 23 27
 15 L1: 16 17 18 19
 
 

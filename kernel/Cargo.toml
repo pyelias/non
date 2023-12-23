@@ -1,0 +1,13 @@
+[package]
+name = "sparkle"
+version = "0.1.0"
+edition = "2021"
+
+[profile.dev]
+opt-level = 2
+
+[dependencies]
+paste = "1.0"
+
+[build-dependencies]
+cc = "1.0"

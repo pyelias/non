@@ -1,5 +1,0 @@
-[workspace]
-members = ["src/kernel"]
-
-[profile.dev]
-opt-level = 2

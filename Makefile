@@ -1,49 +1,24 @@
-CC = x86_64-elf-gcc
-CFLAGS =  -c -ffreestanding -MMD 
-CFLAGS += -m64 -mcmodel=kernel -mno-red-zone -mabi=sysv -msoft-float
-# don't use float registers, interrupt handlers don't save them
-CFLAGS += -mno-sse -mno-mmx -mno-sse2 -mno-3dnow -mno-avx
-CFLAGS += -O2 -Wall -Wextra
-AS = nasm
-ASFLAGS = -f elf64 -w+orphan-labels
+KERNEL_BUILD_OUT_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))kernel/target/x86_64-unknown-kernel/debug
+KERNEL_DEPS := $(KERNEL_BUILD_OUT_DIR)/sparkle.d
+KERNEL_OBJ := $(KERNEL_BUILD_OUT_DIR)/sparkle
 
-KERNEL_SRC_DIR = src/kernel
-KERNEL_OBJ_DIR = build/objs/kernel
-KERNEL_DEP_DIR = build/deps/kernel
+$(KERNEL_OBJ) $(KERNEL_DEPS): kernel/build.rs
+	cd kernel && cargo build -q -p sparkle --profile dev
 
-kernel_c_src = $(shell find $(KERNEL_SRC_DIR) -name *.c)
-kernel_asm_src = $(shell find $(KERNEL_SRC_DIR) -name *.asm)
-kernel_rs_src = $(shell find $(KERNEL_SRC_DIR) -name *.rs)
-kernel_obj =  $(kernel_c_src:$(KERNEL_SRC_DIR)/%.c=$(KERNEL_OBJ_DIR)/%.c.o)
-kernel_obj += $(kernel_asm_src:$(KERNEL_SRC_DIR)/%.asm=$(KERNEL_OBJ_DIR)/%.asm.o)
-kernel_obj += $(KERNEL_OBJ_DIR)/libkernel_rs.a
-kernel_dep =  $(src:src/%.c=$(KERNEL_DEP_DIR)/%.c.d)
-kernel_dep += $(src:src/%.asm=$(KERNEL_DEP_DIR)/%.asm.d)
+include $(KERNEL_DEPS)
 
-test.bin: build/kernel.o
-	objcopy -O elf32-i386 build/kernel.o test.bin
+isodir/boot/nonos.bin: $(KERNEL_OBJ)
+	cp $< $@
 
-build/kernel.o: $(kernel_obj) linker.ld
-	ld -m elf_x86_64 -T linker.ld -o $@ $(kernel_obj)
+nonos.iso: isodir/boot/nonos.bin
+	grub-mkrescue -o nonos.iso --xorriso=../xorriso/xorriso isodir
 
-$(KERNEL_OBJ_DIR)/%.c.o: $(KERNEL_SRC_DIR)/%.c $(KERNEL_OBJ_DIR) 
-	$(CC) $(CFLAGS) -Iinclude/kernel -o $@ $<
+.PHONY: build run debug
 
-$(KERNEL_OBJ_DIR)/%.asm.o: $(KERNEL_SRC_DIR)/%.asm $(KERNEL_OBJ_DIR) $(KERNEL_DEP_DIR)
-	$(AS) $(ASFLAGS) -MD $(KERNEL_DEP_DIR)/$*.asm.d -o $@ $<
+build: nonos.iso
 
-$(KERNEL_OBJ_DIR)/libkernel_rs.a: $(kernel_rs_src)
-	cargo +nightly build -q -p sparkle --profile dev --out-dir=$(KERNEL_OBJ_DIR) -Z unstable-options
+run: nonos.iso
+	qemu-system-x86_64 -cdrom nonos.iso
 
-$(KERNEL_OBJ_DIR) $(KERNEL_DEP_DIR):
-	mkdir -p $@
-
--include $(kernel_dep)
-
-.PHONY: clean
-clean:
-	rm -rf build
-
-.PHONY: cleandep
-cleandep:
-	rm build/*.d
+debug: nonos.iso
+	qemu-system-x86_64 -s -S -d int -D qemu-log.txt -cdrom nonos.iso

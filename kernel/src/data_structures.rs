@@ -1,7 +1,6 @@
 pub mod list;
-pub mod mpsc_pile;
+mod slot;
 mod storage;
 
-pub use storage::{
-    DefaultSlot, FieldSlot, GetsField, Stores, StoresAtomic, StoresIn, StoresInAtomic,
-};
+pub use slot::{IsSlotOf, ObjectSlot};
+pub use storage::{AtomicStore, Store, Stores};

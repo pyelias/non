@@ -1,31 +1,30 @@
-use core::marker::PhantomData;
+use super::{IsSlotOf, Store, Stores};
 
-use super::StoresIn;
-
-pub struct IntrusiveLinkedList<Item, NextSlot> {
-    head: Option<Item>,
-    _slot: PhantomData<NextSlot>,
+pub trait ListLink: Sized {
+    type Slot: IsSlotOf<Self, Value = LinkStore<Self>>;
+    type Store: Stores<Option<Self>>;
 }
 
-impl<'item, Item: 'item, NextSlot: StoresIn<Item, Option<Item>>>
-    IntrusiveLinkedList<Item, NextSlot>
-{
+type LinkStore<Link: ListLink> = Store<Link::Store, Option<Link>>;
+
+pub struct List<ItemLink> {
+    head: Option<ItemLink>,
+}
+
+impl<'item, Link: 'item + ListLink> List<Link> {
     pub fn empty() -> Self {
-        Self {
-            head: None,
-            _slot: PhantomData,
-        }
+        Self { head: None }
     }
 
-    pub fn push(&mut self, mut item: Item) {
+    pub fn push(&mut self, mut item: Link) {
         let next = self.head.take();
-        NextSlot::set(&mut item, next);
+        Link::Slot::get_mut(&mut item).set(next);
         self.head = Some(item);
     }
 
-    pub fn pop(&mut self) -> Option<Item> {
+    pub fn pop(&mut self) -> Option<Link> {
         let mut head = self.head.take()?;
-        let rest = NextSlot::take(&mut head);
+        let rest = Link::Slot::get_mut(&mut head).take();
         self.head = rest;
         Some(head)
     }

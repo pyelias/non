@@ -1,5 +1,6 @@
 use super::page::PAGE_SHIFT;
 use super::page_table::PTE_INDEX_SIZE;
+use crate::util::align::Alignment;
 use core::fmt::Display;
 
 const ID_MAP_SIZE: usize = 1 << 30;
@@ -7,30 +8,10 @@ const ID_MAP_SIZE: usize = 1 << 30;
 const HIGH_ID_MAP_ADDR: usize = 0xFFFF_FFFF_C000_0000;
 const VIRT_ADDR_BITS: usize = 48;
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug)]
-pub struct Alignment(usize);
-
-impl Alignment {
-    #[inline(always)]
-    pub fn mask(&self) -> usize {
-        (1 << self.0) - 1
-    }
-
-    #[inline(always)]
-    pub fn high_mask(&self) -> usize {
-        !self.mask()
-    }
-
-    pub fn size(&self) -> usize {
-        1 << self.0
-    }
-}
-
-const PAGE_ALIGNMENT: Alignment = Alignment(PAGE_SHIFT);
-const PTL2_ALIGNMENT: Alignment = Alignment(PAGE_SHIFT + PTE_INDEX_SIZE);
-const PTL3_ALIGNMENT: Alignment = Alignment(PAGE_SHIFT + PTE_INDEX_SIZE * 2);
-const PTL4_ALIGNMENT: Alignment = Alignment(PAGE_SHIFT + PTE_INDEX_SIZE * 3);
+const PAGE_ALIGNMENT: Alignment = Alignment::new_from_shift(PAGE_SHIFT);
+const PTL2_ALIGNMENT: Alignment = Alignment::new_from_shift(PAGE_SHIFT + PTE_INDEX_SIZE);
+const PTL3_ALIGNMENT: Alignment = Alignment::new_from_shift(PAGE_SHIFT + PTE_INDEX_SIZE * 2);
+const PTL4_ALIGNMENT: Alignment = Alignment::new_from_shift(PAGE_SHIFT + PTE_INDEX_SIZE * 3);
 
 pub trait HasPhysAddr {
     fn usize(&self) -> usize;
@@ -56,7 +37,12 @@ pub trait HasPhysAddr {
 
     #[inline(always)]
     fn align<A: AlignedPhys>(&self) -> A {
-        A::from_usize(self.usize() & A::ALIGNMENT.high_mask())
+        A::from_usize(A::ALIGNMENT.align_down(self.usize()))
+    }
+
+    #[inline(always)]
+    fn align_up<A: AlignedPhys>(&self) -> A {
+        A::from_usize(A::ALIGNMENT.align_up(self.usize()))
     }
 
     fn to_virt(&self) -> VirtAddr {
@@ -71,13 +57,8 @@ pub trait HasPhysAddr {
     }
 
     #[inline(always)]
-    fn align_offset(&self, alignment: Alignment) -> usize {
-        self.usize() & alignment.mask()
-    }
-
-    #[inline(always)]
     fn is_aligned(&self, alignment: Alignment) -> bool {
-        self.align_offset(alignment) == 0
+        alignment.is_aligned(self.usize())
     }
 }
 
@@ -101,6 +82,18 @@ pub trait HasVirtAddr {
     }
 
     #[inline(always)]
+    fn to_phys(&self) -> PhysAddr {
+        let addr = self.usize();
+        // only the top 1GB virt is id-mapped
+        assert!(
+            HIGH_ID_MAP_ADDR <= addr,
+            "tried to use the 1GiB id-map on an address outside its range: {}",
+            self.virt_addr()
+        );
+        (addr - HIGH_ID_MAP_ADDR).phys_addr()
+    }
+
+    #[inline(always)]
     fn try_as_aligned<A: AlignedVirt>(&self) -> Option<A> {
         if !self.is_aligned(A::ALIGNMENT) {
             return None;
@@ -116,28 +109,17 @@ pub trait HasVirtAddr {
 
     #[inline(always)]
     fn align<A: AlignedVirt>(&self) -> A {
-        A::from_usize(self.usize() & A::ALIGNMENT.high_mask())
-    }
-
-    fn to_phys(&self) -> PhysAddr {
-        let addr = self.usize();
-        // only the top 1GB virt is id-mapped
-        assert!(
-            HIGH_ID_MAP_ADDR <= addr,
-            "tried to use the 1GiB id-map on an address outside its range: {}",
-            self.virt_addr()
-        );
-        (addr - HIGH_ID_MAP_ADDR).phys_addr()
+        A::from_usize(A::ALIGNMENT.align_down(self.usize()))
     }
 
     #[inline(always)]
-    fn align_offset(&self, alignment: Alignment) -> usize {
-        self.usize() & alignment.mask()
+    fn align_up<A: AlignedPhys>(&self) -> A {
+        A::from_usize(A::ALIGNMENT.align_up(self.usize()))
     }
 
     #[inline(always)]
     fn is_aligned(&self, alignment: Alignment) -> bool {
-        self.align_offset(alignment) == 0
+        alignment.is_aligned(self.usize())
     }
 }
 
@@ -150,7 +132,7 @@ pub trait AlignedVirt: HasVirtAddr {
 macro_rules! make_addr_struct {
     ($name:ident) => {
         #[repr(C)]
-        #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+        #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, bytemuck::AnyBitPattern)]
         pub struct $name(usize);
     };
 }
@@ -173,21 +155,25 @@ macro_rules! impl_aligned {
 
             #[inline(always)]
             fn from_usize(n: usize) -> Self {
-                Self(n & $alignment.high_mask())
+                Self(Self::ALIGNMENT.align_down(n))
             }
         }
 
         impl $name {
             pub fn next(self, off: usize) -> Self {
-                Self(self.0 + $alignment.size() * off)
+                Self(self.0 + Self::ALIGNMENT.as_usize() * off)
             }
 
             pub fn prev(self, off: usize) -> Self {
-                Self(self.0 - $alignment.size() * off)
+                Self(self.0 - Self::ALIGNMENT.as_usize() * off)
             }
 
             pub fn offset(self, off: isize) -> Self {
-                Self((self.0 as isize + $alignment.size() as isize * off) as usize)
+                Self((self.0 as isize + Self::ALIGNMENT.as_usize() as isize * off) as usize)
+            }
+
+            pub fn index(self) -> usize {
+                self.0 / Self::ALIGNMENT.as_usize()
             }
         }
     };

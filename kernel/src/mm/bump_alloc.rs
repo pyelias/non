@@ -5,8 +5,6 @@ use core::{
     ptr::slice_from_raw_parts_mut,
 };
 
-use crate::types::HasVirtAddr;
-
 // the lifetime of buffer is the same as the lifetime of the allocator
 pub struct BumpAllocator<'a> {
     buffer: *mut u8,
@@ -16,7 +14,7 @@ pub struct BumpAllocator<'a> {
 
 impl<'a> BumpAllocator<'a> {
     // Safety: buffer must not be aliased while this allocator exists
-    pub unsafe fn new(buffer: *mut u8, len: usize) -> Self {
+    pub unsafe fn new_raw(buffer: *mut u8, len: usize) -> Self {
         Self {
             buffer,
             len,
@@ -24,8 +22,8 @@ impl<'a> BumpAllocator<'a> {
         }
     }
 
-    pub fn new_from_slice(buffer: &'a mut [MaybeUninit<u8>]) -> Self {
-        unsafe { Self::new(buffer.as_mut_ptr() as *mut u8, buffer.len()) }
+    pub fn new(buffer: &'a mut [MaybeUninit<u8>]) -> Self {
+        unsafe { Self::new_raw(buffer.as_mut_ptr() as *mut u8, buffer.len()) }
     }
 
     pub fn remaining(&self) -> usize {
@@ -44,17 +42,17 @@ impl<'a> BumpAllocator<'a> {
     }
 
     pub fn alloc_bytes(&mut self, size: usize) -> *mut u8 {
-        println!("bump allocating at {}", self.buffer.virt_addr());
         let res = self.buffer;
         self.advance(size);
         res
     }
 
+    pub fn align_offset(&self, align: usize) -> usize {
+        self.buffer.align_offset(align)
+    }
+
     pub fn align(&mut self, align: usize) {
-        assert!(align.is_power_of_two());
-        let addr_mod_align = (self.buffer as usize - 1) & (align - 1);
-        let off = align - addr_mod_align - 1;
-        self.advance(off);
+        self.advance(self.align_offset(align));
     }
 
     pub fn align_to<T>(&mut self) {
@@ -103,9 +101,12 @@ impl<'a> BumpAllocator<'a> {
 
     pub fn max_allocs_of_layout(&self, layout: Layout) -> usize {
         assert_ne!(layout.size(), 0, "max_allocs_of zero-sized-type");
-        // no need to think about alignment
-        // size is >= align, so the padding needed to align the first one isn't enough to fit an extra
-        self.remaining() / layout.size()
+        let align_offset = self.align_offset(layout.align());
+        let remaining = self.remaining();
+        if remaining < align_offset {
+            return 0;
+        }
+        (remaining - align_offset) / layout.size()
     }
 
     pub fn max_allocs_of<T>(&self) -> usize {
@@ -116,11 +117,7 @@ impl<'a> BumpAllocator<'a> {
         self.buffer
     }
 
-    pub fn done(mut self) -> &'a mut [MaybeUninit<u8>] {
+    pub fn rest(mut self) -> &'a mut [MaybeUninit<u8>] {
         self.alloc_slice_uninit::<u8>(self.len)
-    }
-
-    pub fn done_ptr(self) -> *mut u8 {
-        self.buffer
     }
 }

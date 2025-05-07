@@ -2,58 +2,12 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::{env, fs};
 
-const COMPILER: &'static str = "x86_64-elf-gcc";
 const ARCHIVER: &'static str = "x86_64-elf-ar";
-
-const C_FLAGS: &'static [&'static str] = &[
-    "-c",
-    "-ffreestanding",
-    "-m64",
-    "-mcmodel=kernel",
-    "-mno-red-zone",
-    "-mabi=sysv",
-    "-msoft-float",
-    "-mno-sse",
-    "-mno-mmx",
-    "-mno-sse2",
-    "-mno-3dnow",
-    "-mno-avx",
-];
-
-const C_SRC: &'static [&'static str] = &[
-    "c_src/entry.c",
-    "c_src/hang.c",
-    "c_src/int.c",
-    "c_src/io.c",
-    "c_src/mm.c",
-    "c_src/types.c",
-];
 
 const ASM_FLAGS: &'static [&'static str] = &["-felf64", "-w+orphan-labels"];
 
-const ASM_SRC: &'static [&'static str] = &[
-    "asm_src/boot.asm",
-    "asm_src/int.asm",
-    "asm_src/mm.asm",
-    "asm_src/task.asm",
-];
-
-fn build_c() {
-    let mut cc_build = cc::Build::new();
-    cc_build
-        .compiler(COMPILER)
-        .archiver(ARCHIVER)
-        .no_default_flags(true)
-        .include("include");
-
-    for c_flag in C_FLAGS {
-        cc_build.flag(c_flag);
-    }
-
-    cc_build.files(C_SRC);
-
-    cc_build.compile("sparkle_c");
-}
+const ASM_SRC: &'static [&'static str] =
+    &["asm_src/boot.asm", "asm_src/int.asm", "asm_src/task.asm"];
 
 fn run_cmd(cmd: &mut Command) {
     println!("running {:?}", cmd);
@@ -71,7 +25,7 @@ fn build_asm() {
     ar_cmd.env("ZERO_AR_DATE", "1");
     ar_cmd.arg("cq").arg(&ar_path);
 
-    for file in ASM_SRC {
+    for &file in ASM_SRC {
         let mut dst = out_dir.join(file);
         dst.set_extension("o");
         fs::create_dir_all(dst.parent().unwrap()).unwrap();
@@ -84,20 +38,22 @@ fn build_asm() {
 
     run_cmd(&mut ar_cmd);
     run_cmd(Command::new(ARCHIVER).arg("s").arg(&ar_path));
+    println!(
+        "cargo:rustc-link-search=native={}",
+        out_dir.to_str().unwrap()
+    );
     println!("cargo:rustc-link-lib=static=sparkle_asm");
 }
 
 fn mark_used_files() {
-    for file in C_SRC.iter().chain(ASM_SRC.iter()) {
+    for &file in ASM_SRC.iter() {
         println!("cargo:rerun-if-changed={}", file);
     }
 }
 
 fn main() {
-    build_c();
     build_asm();
     mark_used_files();
-
     println!(
         "cargo:rustc-link-arg=-T{}",
         env::current_dir()

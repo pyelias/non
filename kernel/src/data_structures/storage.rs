@@ -1,4 +1,4 @@
-use atomic_traits::{fetch::Or, Atomic};
+use atomic_traits::Atomic;
 use core::{marker::PhantomData, sync::atomic::Ordering};
 
 // this trait could be used to copy types that are not Copy

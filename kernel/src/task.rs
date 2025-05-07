@@ -1,5 +1,7 @@
 use core::cell::Cell;
 
+use crate::types::HasVirtAddr;
+
 #[repr(C)]
 pub struct TCB {
     rsp: u64, // stack pointer

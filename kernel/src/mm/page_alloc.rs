@@ -1,6 +1,9 @@
+use core::ptr::addr_of;
+
 use super::alloc_frame;
 use super::page_table::{PTL1Entries, PTL1EntrySlot, PTL2Entries, PTL3Entries, PTL1, PTL2};
 use crate::sync::SpinLock;
+use crate::types::zeroable::zero_ptr;
 use crate::types::{
     page_table::{pte_indices_to_addr, Entry},
     zeroable, FrameAddr, HasPhysAddr, HasVirtAddr, PageAddr,
@@ -16,19 +19,19 @@ struct PageAllocator {
 impl PageAllocator {
     unsafe fn new(
         mut l3: PTL3Entries<'static>,
-        init_l2: &mut PTL2,
+        init_l2: &'static mut PTL2,
         init_l2_phys: FrameAddr,
-        init_l1: &mut PTL1,
+        init_l1: &'static mut PTL1,
         init_l1_phys: FrameAddr,
     ) -> Self {
         let mut init_l2 = unsafe {
             l3.take_first()
-                .map_subtable(Entry::at_frame(init_l2_phys), init_l2.as_aligned())
+                .map_subtable(Entry::at_frame(init_l2_phys), init_l2)
         };
         let init_l1 = unsafe {
             init_l2
                 .take_first()
-                .map_subtable(Entry::at_frame(init_l1_phys), init_l1.as_aligned())
+                .map_subtable(Entry::at_frame(init_l1_phys), init_l1)
         };
         Self {
             l3: l3,
@@ -67,14 +70,16 @@ impl PageAllocator {
     fn map_new_l2(&mut self) {
         let l3_entry = self.l3.take_first();
         let (ptl2_virt, ptl2_phys) = self.map_page();
-        let new_l2 = unsafe { l3_entry.map_subtable(Entry::at_frame(ptl2_phys), ptl2_virt) };
+        let new_l2 =
+            unsafe { l3_entry.map_subtable(Entry::at_frame(ptl2_phys), zero_ptr(ptl2_virt.ptr())) };
         self.curr_l2 = new_l2;
     }
 
     fn map_new_l1(&mut self) {
         let l2_entry = self.curr_l2.take_first();
         let (ptl1_virt, ptl1_phys) = self.map_page();
-        let new_l1 = unsafe { l2_entry.map_subtable(Entry::at_frame(ptl1_phys), ptl1_virt) };
+        let new_l1 =
+            unsafe { l2_entry.map_subtable(Entry::at_frame(ptl1_phys), zero_ptr(ptl1_virt.ptr())) };
         self.curr_l1 = new_l1;
     }
 }
@@ -89,20 +94,23 @@ pub fn alloc_page() -> Option<PageAddr> {
     Some(PAGE_ALLOC.lock().as_mut().unwrap().alloc_page())
 }
 
-// PAGE_ALLOC needs a couple page tables to start with
-// only it is allowed to touch these
-static mut INIT_PTL2: PTL2 = zeroable::zeroed();
-static mut INIT_PTL1: PTL1 = zeroable::zeroed();
-
-pub unsafe fn init() {
+pub unsafe fn get_l3_entries() -> PTL3Entries<'static> {
     let allocator_start_addr = pte_indices_to_addr(511, 0, 0, 0); // 511th entry of the l4 page table, then 0th entry of the l3-l1 tables
     println!("mm virt s {}", allocator_start_addr);
 
     let l3_entries: &'static mut [usize; 511] = unsafe { &mut *(0x2000usize.to_virt()).ptr() };
-    let l3_entries = PTL3Entries::from_entries_addr(l3_entries, allocator_start_addr.as_aligned());
+    PTL3Entries::from_entries_addr(l3_entries, allocator_start_addr.as_aligned())
+}
 
-    let l2_table_frame_addr = (&INIT_PTL2).to_phys().as_aligned();
-    let l1_table_frame_addr = (&INIT_PTL1).to_phys().as_aligned();
+pub unsafe fn init() {
+    let l3_entries = get_l3_entries();
+
+    let l2_table_frame_addr = addr_of!(INIT_PTL2).to_phys().as_aligned();
+    let l1_table_frame_addr = addr_of!(INIT_PTL2).to_phys().as_aligned();
+
+    // PAGE_ALLOC needs a couple page tables to start with
+    static mut INIT_PTL2: PTL2 = zeroable::zeroed();
+    static mut INIT_PTL1: PTL1 = zeroable::zeroed();
 
     let page_alloc = PageAllocator::new(
         l3_entries,

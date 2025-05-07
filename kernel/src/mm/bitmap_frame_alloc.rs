@@ -1,42 +1,20 @@
+use core::arch::asm;
+use core::iter::Peekable;
+use core::ops::Range;
+use core::ptr::addr_of;
+
 use crate::mm::bump_alloc::BumpAllocator;
-use crate::multiboot::{self, MMapEntryType};
+use crate::multiboot::{self, MMapEntryKind};
 use crate::sync::SpinLock;
+use crate::types::PhysAddr;
 use crate::types::{
     self,
     page_table::{Entry, PageTable},
     FrameAddr, HasPhysAddr, HasVirtAddr,
 };
+use crate::util::align::Alignment;
 
 const MAX_PAGE_ORDER: u8 = 10;
-
-extern "sysv64" {
-    // these are linker variables; their addresses matter, but they have no values
-    static mut HIGH_ID_MAP_VMA: u8;
-    static mut KERNEL_END_VMA: u8;
-}
-
-#[no_mangle]
-extern "sysv64" fn get_usable_memory(
-    info: &multiboot::Info,
-    low_frame: &mut FrameAddr,
-    high_frame: &mut FrameAddr,
-) {
-    // safe because we don't care about the values of those things
-    // just their addresses
-    let kernel_phys_end = unsafe {
-        core::ptr::addr_of!(KERNEL_END_VMA).usize() - core::ptr::addr_of!(HIGH_ID_MAP_VMA).usize()
-    };
-    *low_frame = kernel_phys_end.phys_addr().align::<FrameAddr>().next(1);
-
-    let mut high_addr = 0;
-    for entry in info.mmap_entries() {
-        if let MMapEntryType::Available = entry.type_() {
-            // { entry.addr } instead of entry.addr puts it on the stack so i can take a reference to it
-            high_addr = core::cmp::max(high_addr, { entry.addr }.usize() + entry.len);
-        }
-    }
-    *high_frame = high_addr.phys_addr().align::<FrameAddr>();
-}
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 struct GroupSize(u8);
@@ -254,27 +232,99 @@ impl BitmapFrameAllocator {
             Some(order.frame_at_idx(frame_idx))
         }
     }
+
+    fn free_frame_range(&mut self, range: Range<usize>) {
+        let (skip_bits_after_start, mid, extra_bits_after_end) =
+            Alignment::new(64).split_range(range);
+        let start = mid.start / 64;
+        let end = mid.end / 64;
+
+        self.group_maps[0][start] |= u64::MAX << skip_bits_after_start;
+        for i in start + 1..end {
+            self.group_maps[0][i] = u64::MAX;
+        }
+        self.group_maps[0][end] |= (1 << extra_bits_after_end) - 1;
+    }
+
+    fn use_frame_range(&mut self, range: Range<usize>) {
+        let (skip_bits_after_start, mid, extra_bits_after_end) =
+            Alignment::new(64).split_range(range);
+        let start = mid.start / 64;
+        let end = mid.end / 64;
+
+        self.group_maps[0][start] &= !(u64::MAX << skip_bits_after_start);
+        for i in start + 1..end {
+            self.group_maps[0][i] = 0;
+        }
+        self.group_maps[0][end] &= !((1 << extra_bits_after_end) - 1);
+    }
+
+    fn update_all(&mut self) {
+        for size in 1..=self.max_group_size.0 {
+            for idx in 0..self.group_maps[size as usize].len() {
+                self.update_group_avail(GroupSize(size), idx);
+            }
+        }
+    }
 }
 
 static FRAME_ALLOC: SpinLock<Option<BitmapFrameAllocator>> = SpinLock::new(None);
 
-fn setup_bitmap_frame_allocator(map_alloc: &mut BumpAllocator<'static>, frame_count: usize) {
-    let mut group_size = 0;
-    let mut group_count = frame_count;
+#[derive(Clone, Copy)]
+struct GroupSizesIter {
+    group_count: usize,
+    group_size: usize,
+}
 
-    // like [None; 16], but that doesn't work since &mut isn't Copy
-    let mut group_maps: [&'static mut [u64]; 16] = [(); 16].map(|_| &mut [][..]);
-    let mut max_group_size = 0;
-    let mut max_size_group_count = 0;
-    while group_count >= 4 && group_size < 16 {
-        let bits_per_group = match group_size {
+impl GroupSizesIter {
+    fn new(frame_count: usize) -> Self {
+        Self {
+            group_count: frame_count,
+            group_size: 0,
+        }
+    }
+}
+
+impl Iterator for GroupSizesIter {
+    type Item = (usize, usize, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.group_count < 4 || self.group_size == 16 {
+            return None;
+        }
+
+        let bits_per_group = match self.group_size {
             0 => 1,
             1 => 2,
             _ => 4,
         };
+        let entry_count = (bits_per_group * self.group_count + 63) / 64;
+        let res = (self.group_size, self.group_count, entry_count);
 
-        let entry_count = (bits_per_group * group_count + 63) / 64;
+        self.group_size += 1;
+        self.group_count = (self.group_count + 3) / 4;
 
+        Some(res)
+    }
+}
+
+fn get_bitmap_size(frame_count: usize) -> usize {
+    let groups = GroupSizesIter::new(frame_count);
+    groups.map(|(_, _, entry_count)| entry_count).sum()
+}
+
+fn setup_bitmap_frame_allocator(
+    map_alloc: &mut BumpAllocator<'static>,
+    frame_count: usize,
+) -> BitmapFrameAllocator {
+    // like [None; 16], but that doesn't work since &mut isn't Copy
+    let mut group_maps: [&'static mut [u64]; 16] = [(); 16].map(|_| &mut [][..]);
+    let mut max_group_size = 0;
+    let mut max_size_group_count = 0;
+
+    let groups = GroupSizesIter::new(frame_count);
+    for (group_size, group_count, entry_count) in groups {
+        // initialize with 0, which means not free
         group_maps[group_size] = map_alloc.alloc_slice_default(entry_count);
 
         println!("{} groups of size {}", group_count, group_size);
@@ -282,16 +332,13 @@ fn setup_bitmap_frame_allocator(map_alloc: &mut BumpAllocator<'static>, frame_co
 
         max_group_size = group_size;
         max_size_group_count = group_count;
-        group_size += 1;
-        group_count = (group_count + 3) / 4;
     }
 
-    let frame_alloc_ = BitmapFrameAllocator {
+    BitmapFrameAllocator {
         group_maps,
         max_group_size: GroupSize(max_group_size as u8),
         max_size_group_count,
-    };
-    *FRAME_ALLOC.lock() = Some(frame_alloc_);
+    }
 }
 
 pub fn alloc_frame_with_order(order: FrameOrder) -> Option<FrameAddr> {
@@ -313,7 +360,98 @@ pub fn free_frame(frame: FrameAddr) {
     free_frame_with_order(frame, FrameOrder(0));
 }
 
-pub unsafe fn init(multiboot_info: &multiboot::Info) {
+extern "sysv64" {
+    // these are linker variables; their addresses matter, but they have no values
+    static HIGH_ID_MAP_VMA: u8;
+    static KERNEL_END_VMA: u8;
+}
+
+#[derive(Clone)]
+struct RangesDifference<A, I: Iterator<Item = Range<A>>, E: Iterator<Item = Range<A>>> {
+    plus: Peekable<I>,
+    minus: Peekable<E>,
+}
+
+impl<A: Clone + PartialOrd, I: Iterator<Item = Range<A>>, E: Iterator<Item = Range<A>>> Iterator
+    for RangesDifference<A, I, E>
+{
+    type Item = Range<A>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let Some(minus) = self.minus.peek().cloned() else {
+                return self.plus.next();
+            };
+
+            let plus = self.plus.peek()?.clone();
+
+            if minus.end <= plus.start {
+                self.minus.next();
+                continue;
+            }
+
+            if minus.start >= plus.end {
+                self.plus.next();
+                continue;
+            }
+
+            // minus and plus are guaranteed to overlap
+
+            // remove the current minus from the current plus
+            if minus.end < plus.end {
+                self.plus.peek_mut().unwrap().start = minus.end;
+                self.minus.next();
+            } else {
+                self.plus.next();
+            }
+
+            // if part of plus isn't subtracted, return that part
+            if plus.start < minus.start {
+                return Some(plus.start..minus.start);
+            }
+        }
+    }
+}
+
+fn get_usable_memory(
+    multiboot_info: multiboot::Info,
+) -> impl Iterator<Item = Range<PhysAddr>> + Clone {
+    let mmap: multiboot::MMapEntryIterator = multiboot_info.get_tag().unwrap();
+
+    let free_mem = mmap.filter_map(|e| {
+        if let MMapEntryKind::Available = e.kind() {
+            Some(e.addr..(e.addr.usize() + e.len).phys_addr())
+        } else {
+            None
+        }
+    });
+
+    let kernel_end_phys = addr_of!(KERNEL_END_VMA).to_phys();
+    let mut used_mem = [
+        0usize.phys_addr()..kernel_end_phys, // first 1MB, then kernel binary immediately after
+        multiboot_info.mem_range(),          // the multiboot info
+    ];
+    used_mem.sort_unstable_by_key(|r| r.start);
+
+    RangesDifference {
+        plus: free_mem.peekable(),
+        minus: used_mem.into_iter().peekable(), // first 1b is used
+    }
+}
+
+fn get_frame_count(mem: impl Iterator<Item = Range<PhysAddr>>) -> usize {
+    mem.map(|r| r.end.align_up::<FrameAddr>())
+        .max()
+        .unwrap()
+        .index()
+}
+
+#[inline]
+unsafe fn flush_tlb() {
+    asm!("mov rax, cr3", "mov cr3, rax", out("rax") _);
+}
+
+pub unsafe fn init(multiboot_info: multiboot::Info) {
     // clear low-address identity mapping set up during boot
     // it's probably fine to just leave it but i dont want to
     let ptl4: &mut PageTable = unsafe { &mut *0x1000usize.to_virt().ptr() };
@@ -321,36 +459,43 @@ pub unsafe fn init(multiboot_info: &multiboot::Info) {
     let ptl3: &mut PageTable = unsafe { &mut *0x2000usize.to_virt().ptr() };
     ptl3[0].write(Entry::empty());
 
-    extern "sysv64" {
-        fn flush_tlb();
-    }
     unsafe { flush_tlb() };
 
-    let mut low_frame = 0usize.phys_addr().as_aligned::<FrameAddr>();
-    let mut high_frame = low_frame;
-    get_usable_memory(multiboot_info, &mut low_frame, &mut high_frame);
-    println!("low_frame:  {}", low_frame);
-    println!("high_frame: {}", high_frame);
-
-    let frame_count = high_frame.usize() >> types::page::PAGE_SHIFT;
-
-    // for allocator debugging, make the memory really small i guess
-    // let high_frame = (low_frame.usize() + 0x100000).frame_addr);
-
-    let bitmap_start_ptr = low_frame.to_virt().ptr();
-    let mem_length = high_frame.usize() - low_frame.usize();
-    let mut map_alloc = unsafe { BumpAllocator::new(bitmap_start_ptr, mem_length) };
-    setup_bitmap_frame_allocator(&mut map_alloc, frame_count);
-    let bitmap_end_ptr = map_alloc.done_ptr();
-    let low_frame = bitmap_end_ptr.to_phys().align::<FrameAddr>().next(1);
-
-    println!("low_frame:  {}", low_frame);
-    println!("high_frame: {}", high_frame);
-    let frame_count = (high_frame.usize() - low_frame.usize()) >> types::page::PAGE_SHIFT;
-    println!("total free frames: {}", frame_count);
-    let mut curr_frame = low_frame;
-    for _ in 0..frame_count {
-        free_frame(curr_frame);
-        curr_frame = curr_frame.next(1);
+    let usable_memory = get_usable_memory(multiboot_info);
+    for range in usable_memory.clone() {
+        println!("open: {:?}", range);
     }
+
+    let frame_count = get_frame_count(usable_memory.clone());
+    let bitmap_size = get_bitmap_size(frame_count);
+    let mut bitmap_addr = None;
+    for range in usable_memory.clone() {
+        let start = Alignment::of::<u64>().align_up(range.start.usize());
+        if range.end.usize() - start > bitmap_size {
+            bitmap_addr = Some(start);
+            break;
+        }
+    }
+    let bitmap_addr = bitmap_addr.unwrap();
+
+    let bitmap_size_bytes = bitmap_size * core::mem::size_of::<u64>();
+    let mut bitmap_bump_alloc =
+        BumpAllocator::new_raw(bitmap_addr.phys_addr().to_virt().ptr(), bitmap_size_bytes);
+    let mut frame_alloc = setup_bitmap_frame_allocator(&mut bitmap_bump_alloc, frame_count);
+
+    for range in usable_memory.clone() {
+        frame_alloc.free_frame_range(
+            range.start.align_up::<FrameAddr>().index()..range.end.align::<FrameAddr>().index(),
+        );
+    }
+    frame_alloc.use_frame_range(
+        bitmap_addr.phys_addr().align_up::<FrameAddr>().index()
+            ..(bitmap_addr + bitmap_size_bytes)
+                .phys_addr()
+                .align::<FrameAddr>()
+                .index(),
+    );
+    frame_alloc.update_all();
+
+    *FRAME_ALLOC.lock() = Some(frame_alloc);
 }

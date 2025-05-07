@@ -45,7 +45,7 @@ impl Slab {
         assert!(layout.size() >= size_of::<usize>());
         assert!(layout.align() >= align_of::<usize>());
 
-        let mut alloc = BumpAllocator::new_from_slice(buffer);
+        let mut alloc = BumpAllocator::new(buffer);
         let obj_count = alloc.max_allocs_of_layout(layout);
         let obj_buffer = alloc.alloc_slice_layout(layout, obj_count);
         let mut avail_list = ObjList::new();
@@ -90,7 +90,7 @@ impl Segment {
     // Safety: buffer's start and end must be aligned to something something
     pub unsafe fn make_small_alloc(buffer: &'static mut [MaybeUninit<u8>]) -> Pin<&'static Self> {
         assert!(buffer.len() == SMALL_ALLOC_SEG_SIZE);
-        let mut alloc = BumpAllocator::new_from_slice(&mut buffer[..SMALL_ALLOC_SEG_SIZE]);
+        let mut alloc = BumpAllocator::new(&mut buffer[..SMALL_ALLOC_SEG_SIZE]);
 
         let seg = alloc.alloc_uninit::<Segment>();
         let slabs = alloc.alloc_slice_uninit::<SlabSlot>(SMALL_ALLOC_SLAB_COUNT);

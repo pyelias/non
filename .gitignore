@@ -4,3 +4,4 @@ test.bin
 qemu-log.txt
 Cargo.lock
 isodir/nonos.bin
+nonos.iso

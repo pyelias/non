@@ -1,17 +1,24 @@
-bits 32
-    
-MBALIGN     equ 1 << 0 ; page-aligned
-MEMINFO     equ 1 << 1 ; provide memory map
-FLAGS       equ MBALIGN | MEMINFO
-MAGIC       equ 0x1BADB002
-CHECKSUM    equ -(MAGIC + FLAGS)
-
-; multiboot header
+; multiboot2 header
 [section .multiboot alloc noexec nowrite progbits align=4]
-align 4
-    dd MAGIC
-    dd FLAGS
-    dd CHECKSUM
+align 8
+multiboot_header:
+    .MAGIC_NUMBER equ 0xE85250D6
+    .ARCH equ 0 ; x86 protected mode
+    .LENGTH equ .end - multiboot_header
+
+    dd .MAGIC_NUMBER
+    dd .ARCH
+    dd .LENGTH
+    dd -(.MAGIC_NUMBER + .ARCH + .LENGTH) ; checksum
+
+    align 8
+    .end_tag:
+    dw 0 ; type: end
+    dw 0 ; no flags
+    dd .end_tag_end - .end_tag ; size
+    .end_tag_end:
+
+    .end:
 
 ; space for a small stack
 [section .bootstrap_bss alloc noexec write nobits align=4]
@@ -22,6 +29,7 @@ stack_top:
 
 [section .bootstrap_text alloc exec nowrite progbits align=16]
 global _start:function (_start.end - _start)
+bits 32
 _start:
     mov esp, stack_top ; setup stack
 
@@ -37,28 +45,33 @@ _start:
     mov esi, err_no_cpuid
     jz error
 
-    call is_long_mode_supported
+    call is_cpuid_supported
     mov esi, err_no_long_mode
     jz error
 
-    ; todo make this work
-    call load_tss
+
+    mov byte [0xB8500], 'b'
 
     call set_up_paging
+    mov byte [0xB8500], 'c'
 
     call prepare_for_long_mode
 
-    ; load the GDT with a 32 bit physical address
+    mov byte [0xB8500], 'd'
+    
     lgdt [GDT.desc]
-    ; use the GDT to jump to 64-bit mode
+
+    mov byte [0xB8500], 'e'
+
     jmp GDT.long_mode_code:.in_long_mode
-.in_long_mode:
+    .in_long_mode:
     bits 64
 
-    ; reload the GDT, now with a 64 bit virtual address
     extern HIGH_ID_MAP_VMA
-    add qword [GDT.desc_base_addr], HIGH_ID_MAP_VMA
+    add qword [GDT.desc_base_addr], HIGH_ID_MAP_VMA ; change gdtr to use high identity map
     lgdt [GDT.desc]
+
+    mov byte [0xB8500], 'f'
 
     mov rax, GDT.long_mode_data
     mov ds, rax
@@ -70,14 +83,14 @@ _start:
     add rsp, HIGH_ID_MAP_VMA
     mov rax, call_kernel_main
     jmp rax
-    bits 32
 .end:
+bits 32
 
 error:
     call puts
     jmp hang
 
-; takes string address in esi
+; takes string address in rsi
 puts:
     mov edi, 0xB8500
 .loop:
@@ -103,7 +116,7 @@ is_cpuid_supported:
 
     xor dword [esp], 1 << 21 ; flip bit 21 in TOS
 
-    ; set EFLAGS with flipped bit, then put the new value in eax
+    ; set EFLAGS with flipped bit, then put the new value in rax
     popfd
     pushfd
     pop eax
@@ -136,34 +149,8 @@ is_long_mode_supported:
     xor eax, eax
     ret
 
-load_tss:
-    ; lower half of TSS virt addr in eax
-    mov eax, TSS
-    or eax, 0x80000000
-    mov eax, GDT.TSS
-
-    mov edi, GDT + GDT.TSS
-    mov [edi], word TSS.size-1 ; 16 bits limit
-    mov [edi + 2], word ax     ; 16 bits base
-    shr eax, 16                ;
-    mov [edi + 4], byte al     ; 8 bits base
-    mov [edi + 5], byte 0x89   ; access byte
-    mov [edi + 6], byte 0      ; 4 bit limit + 4 bit flags
-    mov [edi + 7], byte ah     ; 8 bits base
-    mov [edi + 8], dword 0     ; 16 bits base
-    mov [edi + 12], dword 0    ; 16 bits base
-
-    ltr ax
-
-    ret
-
 set_up_paging:
-    ; clear paging bit in cr0
-    mov eax, cr0
-    and eax, ~(1 << 31)
-    mov cr0, eax
-
-    ; now, make page tables
+    ; make page tables
     ; 0x1000: level 4 PML4T (page map level-4 table)
     ; 0x2000: level 3 PDPT (page directory pointer table)
     ; 0x3000: level 2 PDT (page directory table)
@@ -174,13 +161,12 @@ set_up_paging:
 
     ; first, zero all 3 pages
     mov edi, 0x1000
-    mov cr3, edi
     xor eax, eax
     mov ecx, 3 * 1024
     ; 3 * 1024 times, set 4 bytes at [edi] to 0 and add 4 to edi
     ; so zero 3 * 1024 * 4 bytes or 3 pages
     rep stosd
-    mov edi, cr3
+    mov edi, 0x1000
 
     .ENTRY_PRESENT  equ 1 << 0
     .ENTRY_RW       equ 1 << 1
@@ -209,6 +195,10 @@ set_up_paging:
     add eax, 0x200000 ; point next entry to next 2MB
     add edi, 8        ; move to location of next entry
     loop .id_map_loop
+    
+    ; use new page table
+    mov eax, 0x1000
+    mov cr3, eax
 
     ret
 
@@ -259,8 +249,6 @@ GDT:
         gdt_entry (.PRESENT | .NOT_SYS | .EXEC | .RW), (.PAGE_GRAN | .LONG_MODE)
     .long_mode_data: equ $ - GDT
         gdt_entry (.PRESENT | .NOT_SYS | .RW), (.PAGE_GRAN | .LONG_MODE)
-    .TSS: equ $ - GDT
-        dq 0, 0
 
     ; GDT descriptor
     .desc:
@@ -271,14 +259,9 @@ GDT:
 global GDT_long_mode_code_offset
 GDT_long_mode_code_offset: equ GDT.long_mode_code
 
-TSS:
-    dq 13 dup 0
-    .size equ $ - TSS
-
 section .text
+bits 64
 call_kernel_main:
-    bits 64
-
     ; eax and ebx from multiboot got pushed earlier, and they're still there
     mov edi, [rsp] ; pop ebx for info
     mov esi, [rsp + 4] ; pop eax for magic
@@ -291,8 +274,6 @@ call_kernel_main:
     cli
     hlt
     jmp .halt_loop
-
-    bits 32
 
 [section .bootstrap_rodata progbits alloc noexec nowrite align=4]
 err_no_cpuid: db "cpuid not available", 0

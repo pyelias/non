@@ -1,3 +1,4 @@
+pub mod address_space;
 pub mod bitmap_frame_alloc;
 pub mod bump_alloc;
 pub mod page_alloc;

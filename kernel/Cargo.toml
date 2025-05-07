@@ -6,6 +6,12 @@ edition = "2021"
 [dependencies]
 paste = "1.0"
 atomic-traits = "0.3"
+bytemuck = { version = "1", features = ["derive"] }
+acpi = { path = "../../acpi/acpi", version = "5", features = [] }
+raw-cpuid = "11"
 
 [build-dependencies]
 cc = "1.0"
+
+[profile.dev]
+opt-level = 1

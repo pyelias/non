@@ -1,6 +1,7 @@
 use super::{EntryValue, NonPresentUsize, PTL1Entries, PTL2Entries, PTL3Entries, PTL1, PTL2, PTL3};
 use crate::types::{
-    page_table::Entry, zeroable, HasVirtAddr, PTL2PageAddr, PTL3PageAddr, PTL4PageAddr, PageAddr,
+    page_table::{Entry, Flags, HighLevelEntryFlags},
+    HasVirtAddr, PTL2PageAddr, PTL3PageAddr, PTL4PageAddr, PageAddr,
 };
 
 pub struct EntrySlot<'a>(&'a mut usize);
@@ -85,25 +86,14 @@ macro_rules! impl_entry_methods {
     };
 }
 
-macro_rules! impl_map_page_methods {
-    ($addr:ident) => {
-        pub unsafe fn map_page(mut self, entry: Entry) -> $addr {
-            self.entry().set_entry(entry);
-            self.addr
-        }
-    };
-}
-
 macro_rules! impl_map_subtable_methods {
     ($lifetime:lifetime, $subtable:ident, $subtable_handle:ident) => {
         pub unsafe fn map_subtable(
             mut self,
             entry: Entry,
-            subtable_ptr: PageAddr,
+            subtable: &$lifetime mut $subtable,
         ) -> $subtable_handle<$lifetime> {
             self.entry().set_entry(entry);
-            let subtable_ptr = subtable_ptr.ptr();
-            let subtable: &mut $subtable = zeroable::zero_ptr::<$lifetime>(subtable_ptr);
             $subtable_handle {
                 entries: &mut subtable.entries,
                 addr: self.addr.as_aligned(),
@@ -116,13 +106,22 @@ macro_rules! impl_map_subtable_methods {
 impl<'a> PTL1EntrySlot<'a> {
     impl_entry_methods!('a, PageAddr);
 
-    impl_map_page_methods!(PageAddr);
+    pub unsafe fn map_page(mut self, entry: Entry) -> PageAddr {
+        self.entry().set_entry(entry);
+        self.addr
+    }
 }
 
 impl<'a> PTL2EntrySlot<'a> {
     impl_entry_methods!('a, PTL2PageAddr);
 
     impl_map_subtable_methods!('a, PTL1, PTL1Entries);
+
+    pub unsafe fn map_large_page(mut self, entry: Entry) -> PTL2PageAddr {
+        assert!(entry.flags::<HighLevelEntryFlags>().is_large_page());
+        self.entry().set_entry(entry);
+        self.addr
+    }
 }
 
 impl<'a> PTL3EntrySlot<'a> {

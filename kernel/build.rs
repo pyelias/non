@@ -6,8 +6,12 @@ const ARCHIVER: &'static str = "x86_64-elf-ar";
 
 const ASM_FLAGS: &'static [&'static str] = &["-felf64", "-w+orphan-labels"];
 
-const ASM_SRC: &'static [&'static str] =
-    &["asm_src/boot.asm", "asm_src/int.asm", "asm_src/task.asm"];
+const ASM_SRC: &'static [&'static str] = &[
+    "asm_src/boot.asm",
+    "asm_src/int.asm",
+    "asm_src/task.asm",
+    "asm_src/smp_init.asm",
+];
 
 fn run_cmd(cmd: &mut Command) {
     println!("running {:?}", cmd);

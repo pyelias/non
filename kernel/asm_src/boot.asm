@@ -27,6 +27,11 @@ stack_bottom:
 resb 1 << 16
 stack_top:
 
+align 1 << 12 ; page aligned
+global starting_page_tables
+starting_page_tables:
+resb 3 << 12 ; 3 pages
+
 [section .bootstrap_text alloc exec nowrite progbits align=16]
 global _start:function (_start.end - _start)
 bits 32
@@ -151,45 +156,49 @@ is_long_mode_supported:
 
 set_up_paging:
     ; make page tables
-    ; 0x1000: level 4 PML4T (page map level-4 table)
-    ; 0x2000: level 3 PDPT (page directory pointer table)
-    ; 0x3000: level 2 PDT (page directory table)
+    ; (address written as offset from page_tables)
+    ; 0x0000: level 4 PML4T (page map level-4 table)
+    ; 0x1000: level 3 PDPT (page directory pointer table)
+    ; 0x2000: level 2 PDT (page directory table)
 
+    ; 0x0000 will point to 0x1000 at 0 and 511
     ; 0x1000 will point to 0x2000 at 0 and 511
-    ; 0x2000 will point to 0x3000 at 0 and 511
-    ; 0x3000 will identity map the bottom 1gb
+    ; 0x2000 will identity map the bottom 1gb
 
     ; first, zero all 3 pages
-    mov edi, 0x1000
+    mov edi, starting_page_tables
     xor eax, eax
     mov ecx, 3 * 1024
     ; 3 * 1024 times, set 4 bytes at [edi] to 0 and add 4 to edi
     ; so zero 3 * 1024 * 4 bytes or 3 pages
     rep stosd
-    mov edi, 0x1000
 
     .ENTRY_PRESENT  equ 1 << 0
     .ENTRY_RW       equ 1 << 1
     .ENTRY_PAGESIZE equ 1 << 7
 
     ; now, add entries for 1-4
-    ; 0x1000 (L4) points to:
+    ; 0x0000 (L4) points to:
+    ; 0x1000 at 0b000000000 and 0b111111111
+    mov eax, (starting_page_tables + 0x1000)
+    or eax, .ENTRY_PRESENT | .ENTRY_RW
+    mov dword [starting_page_tables], eax
+    mov dword [starting_page_tables + 511 * 8], eax
+    add edi, 0x1000
+    ; 0x1000 (L3) points to:
     ; 0x2000 at 0b000000000 and 0b111111111
-    mov dword [edi], 0x2000 | .ENTRY_PRESENT | .ENTRY_RW
-    mov dword [edi + 511 * 8], 0x2000 | .ENTRY_PRESENT | .ENTRY_RW
-    add edi, 0x1000
-    ; 0x2000 (L3) points to:
-    ; 0x3000 at 0b000000000 and 0b111111111
-    mov dword [edi], 0x3000 | .ENTRY_PRESENT | .ENTRY_RW
-    mov dword [edi + 511 * 8], 0x3000 | .ENTRY_PRESENT | .ENTRY_RW
-    add edi, 0x1000
-    ; 0x3000 (L2) points to:
+    mov eax, (starting_page_tables + 0x2000)
+    or eax, .ENTRY_PRESENT | .ENTRY_RW
+    mov dword [starting_page_tables + 0x1000], eax
+    mov dword [starting_page_tables + 0x1000 + 511 * 8], eax
+    ; 0x2000 (L2) points to:
     ; 2MB at 0MB at 0b000000000
     ; 2MB at 2MB at 0b000000001
     ; etc.
     ; identity map 1GB total
     mov ecx, 512
     mov eax, .ENTRY_PRESENT | .ENTRY_RW | .ENTRY_PAGESIZE ; pdt entry
+    mov edi, starting_page_tables + 0x2000
 .id_map_loop:
     mov dword [edi], eax
     add eax, 0x200000 ; point next entry to next 2MB
@@ -197,7 +206,7 @@ set_up_paging:
     loop .id_map_loop
     
     ; use new page table
-    mov eax, 0x1000
+    mov eax, starting_page_tables
     mov cr3, eax
 
     ret

@@ -1,7 +1,7 @@
 use core::arch::asm;
 use core::iter::Peekable;
 use core::ops::Range;
-use core::ptr::addr_of;
+use core::ptr::{addr_of, addr_of_mut};
 
 use crate::mm::bump_alloc::BumpAllocator;
 use crate::multiboot::{self, MMapEntryKind};
@@ -451,12 +451,16 @@ unsafe fn flush_tlb() {
     asm!("mov rax, cr3", "mov cr3, rax", out("rax") _);
 }
 
+extern "sysv64" {
+    static mut starting_page_tables: [PageTable; 3];
+}
+
 pub unsafe fn init(multiboot_info: multiboot::Info) {
     // clear low-address identity mapping set up during boot
     // it's probably fine to just leave it but i dont want to
-    let ptl4: &mut PageTable = unsafe { &mut *0x1000usize.to_virt().ptr() };
+    let ptl4: &mut PageTable = unsafe { &mut *addr_of_mut!(starting_page_tables[0]) };
     ptl4[0].write(Entry::empty());
-    let ptl3: &mut PageTable = unsafe { &mut *0x2000usize.to_virt().ptr() };
+    let ptl3: &mut PageTable = unsafe { &mut *addr_of_mut!(starting_page_tables[1]) };
     ptl3[0].write(Entry::empty());
 
     unsafe { flush_tlb() };

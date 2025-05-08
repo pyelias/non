@@ -1,10 +1,17 @@
 ENTRY(_start)
 
+LOW_SAFE_LMA = 0x8000; /* memory below 1M safe to use, needed for SMP init */
 BOOTSTRAP_LMA = 1M;
 HIGH_ID_MAP_VMA = 0xFFFFFFFFC0000000;
 
 SECTIONS
 {
+    . = LOW_SAFE_LMA;
+    .low_safe_lma ALIGN(4K) :
+    {
+        *(.smp_init_low)
+    }
+
     . = BOOTSTRAP_LMA;
     .bootstrap_text ALIGN(4K) :
     {
